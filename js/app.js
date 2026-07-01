@@ -711,11 +711,41 @@ function closeSettings() {
   el.settingsModal.classList.add('hidden');
 }
 
+// Locates the { ... } object literal that contains "databaseURL", walking
+// out to its enclosing braces. This lets the user paste Firebase's full
+// setup snippet as-is (imports, comments, initializeApp(...) call and all)
+// instead of having to trim it down to just the config object by hand.
+function extractConfigObjectLiteral(raw) {
+  const markerIndex = raw.indexOf('databaseURL');
+  if (markerIndex === -1) throw new Error('databaseURL introuvable dans le texte collé');
+
+  let depth = 0;
+  let start = -1;
+  for (let i = markerIndex; i >= 0; i--) {
+    if (raw[i] === '}') depth++;
+    else if (raw[i] === '{') {
+      if (depth === 0) { start = i; break; }
+      depth--;
+    }
+  }
+  if (start === -1) throw new Error('accolade ouvrante du bloc de config introuvable');
+
+  depth = 0;
+  let end = -1;
+  for (let i = start; i < raw.length; i++) {
+    if (raw[i] === '{') depth++;
+    else if (raw[i] === '}') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  if (end === -1) throw new Error('accolade fermante du bloc de config introuvable');
+
+  return raw.slice(start, end + 1);
+}
+
 function parseFirebaseConfigInput(raw) {
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('objet de config introuvable');
-  const objLiteral = raw.slice(start, end + 1);
+  const objLiteral = extractConfigObjectLiteral(raw);
   // Accepts both strict JSON and the JS object literal Firebase's console
   // hands out (unquoted keys) — safe here since it only ever runs text the
   // user pasted into their own browser.
