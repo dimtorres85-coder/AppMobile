@@ -4,6 +4,7 @@ import * as transport from './transport.js';
 import { beep, vibrate } from './signals.js';
 
 let state = loadState();
+let currentPage = 'accueil';
 let confirmCallback = null;
 let pairingEditMode = false;
 let lastFlashedRentreTs = null;
@@ -14,32 +15,44 @@ const alarmAckUnsubscribes = new Map();
 let qrStream = null;
 let qrRafId = null;
 
-const ALARM_HOLD_MS = 600;
+const ALARM_HOLD_MS = 1200;
+const ALARM_IDLE_SUB = 'Maintiens le bouton appuyé pour prévenir le PC';
+const ALARM_HOLDING_SUB = 'Continue d’appuyer…';
 
 const el = {
+  navRail: document.getElementById('nav-rail'),
+  navAlertDot: document.getElementById('nav-alert-dot'),
+  pages: {
+    accueil: document.getElementById('page-accueil'),
+    chrono: document.getElementById('page-chrono'),
+    alerte: document.getElementById('page-alerte'),
+    course: document.getElementById('page-course'),
+  },
+
   timerSession: document.getElementById('timer-session'),
+  chronoSessionTime: document.getElementById('chrono-session-time'),
+
   pilotActuel: document.getElementById('pilote-actuel'),
   piloteDivergence: document.getElementById('pilote-divergence'),
+
   tourBtn: document.getElementById('tour-btn'),
+  tourPausedTag: document.getElementById('tour-paused-tag'),
   tourBtnHint: document.getElementById('tour-btn-hint'),
   lastLapValue: document.getElementById('last-lap-value'),
   recordingToggleBtn: document.getElementById('recording-toggle-btn'),
-  recordingStatus: document.getElementById('recording-status'),
   undoBtn: document.getElementById('undo-btn'),
   lapsList: document.getElementById('laps-list'),
   lapsCount: document.getElementById('laps-count'),
   lapsPending: document.getElementById('laps-pending'),
   exportBtn: document.getElementById('export-btn'),
   resetBtn: document.getElementById('reset-btn'),
-  changePilotBtn: document.getElementById('change-pilote-btn'),
 
-  pilotModal: document.getElementById('pilote-modal'),
   pilotList: document.getElementById('pilote-list'),
   pilotAddForm: document.getElementById('pilote-add-form'),
   pilotAddInput: document.getElementById('pilote-add-input'),
-  pilotModalClose: document.getElementById('pilote-modal-close'),
 
   confirmModal: document.getElementById('confirm-modal'),
+  confirmTitle: document.getElementById('confirm-title'),
   confirmMessage: document.getElementById('confirm-message'),
   confirmOk: document.getElementById('confirm-ok'),
   confirmCancel: document.getElementById('confirm-cancel'),
@@ -48,7 +61,8 @@ const el = {
 
   connectivityDot: document.getElementById('connectivity-dot'),
   connectivityLabel: document.getElementById('connectivity-label'),
-  settingsBtn: document.getElementById('settings-btn'),
+  connectivityDot2: document.getElementById('connectivity-dot-2'),
+  connectivityLabel2: document.getElementById('connectivity-label-2'),
 
   pairingJoin: document.getElementById('pairing-join'),
   pairingJoined: document.getElementById('pairing-joined'),
@@ -62,20 +76,20 @@ const el = {
   qrVideo: document.getElementById('qr-video'),
   qrCancelBtn: document.getElementById('qr-cancel-btn'),
 
-  settingsModal: document.getElementById('settings-modal'),
   settingsConfigInput: document.getElementById('settings-config-input'),
   settingsError: document.getElementById('settings-error'),
   settingsSaveBtn: document.getElementById('settings-save-btn'),
   settingsClearBtn: document.getElementById('settings-clear-btn'),
-  settingsCloseBtn: document.getElementById('settings-close-btn'),
 
   alarmBtn: document.getElementById('alarm-btn'),
   alarmBtnFill: document.getElementById('alarm-btn-fill'),
+  alarmSub: document.getElementById('alarm-sub'),
   alarmStatus: document.getElementById('alarm-status'),
 
   relaisCard: document.getElementById('relais-card'),
   relaisLabel: document.getElementById('relais-label'),
   relaisCountdown: document.getElementById('relais-countdown'),
+  relaisRentreTag: document.getElementById('relais-rentre-tag'),
   courseCountdownLine: document.getElementById('course-countdown-line'),
   courseCountdown: document.getElementById('course-countdown'),
 
@@ -119,6 +133,19 @@ function showToast(message) {
   el.toast.classList.add('visible');
   clearTimeout(showToast._t);
   showToast._t = setTimeout(() => el.toast.classList.remove('visible'), 2200);
+}
+
+// ---- Navigation ----
+
+function goToPage(page) {
+  if (!el.pages[page]) return;
+  currentPage = page;
+  for (const [name, section] of Object.entries(el.pages)) {
+    section.classList.toggle('hidden', name !== page);
+  }
+  for (const btn of el.navRail.querySelectorAll('.nav-item')) {
+    btn.classList.toggle('active', btn.dataset.page === page);
+  }
 }
 
 // ---- Core actions (Phase A) ----
@@ -185,19 +212,15 @@ function addPilote(nomRaw) {
   }
   persist();
   render();
-  renderPiloteModal();
 }
 
 function selectPilote(id) {
-  if (id === state.pilote_courant_id) {
-    closePiloteModal();
-    return;
-  }
+  if (id === state.pilote_courant_id) return;
   state.pilote_courant_id = id;
   state.relais_estime_courant += 1;
   persist();
   render();
-  closePiloteModal();
+  showToast('Pilote : ' + (currentPilote()?.nom || ''));
 }
 
 function resetSession() {
@@ -335,10 +358,14 @@ function closeQrScan() {
 function renderConnectivity() {
   const configured = transport.isConfigured();
   const connected = transport.isConnected();
-  el.connectivityDot.className = 'connectivity-dot ' + (!configured ? 'unconfigured' : connected ? 'connected' : 'disconnected');
-  el.connectivityLabel.textContent = !configured
-    ? 'Relais non configuré'
-    : connected ? 'Relais connecté' : 'Relais hors ligne';
+  const cls = !configured ? 'unset' : connected ? 'ok' : 'off';
+  const label = !configured
+    ? 'Réseau non configuré'
+    : connected ? 'Connecté au PC' : 'Hors ligne — envois en attente';
+  for (const [dotEl, labelEl] of [[el.connectivityDot, el.connectivityLabel], [el.connectivityDot2, el.connectivityLabel2]]) {
+    dotEl.className = 'status-pill__dot ' + cls;
+    labelEl.textContent = label;
+  }
 }
 
 function subscribeToCourse() {
@@ -416,8 +443,12 @@ async function flushLapQueue() {
 
 function startAlarmHold(e) {
   e.preventDefault();
-  el.alarmBtnFill.style.setProperty('--alarm-hold-ms', `${ALARM_HOLD_MS}ms`);
-  el.alarmBtnFill.classList.add('filling');
+  el.alarmSub.textContent = ALARM_HOLDING_SUB;
+  el.alarmBtnFill.style.transition = 'none';
+  el.alarmBtnFill.style.height = '0%';
+  void el.alarmBtnFill.offsetHeight; // force reflow before starting the fill
+  el.alarmBtnFill.style.transition = `height ${ALARM_HOLD_MS}ms linear`;
+  el.alarmBtnFill.style.height = '100%';
   alarmHoldTimer = setTimeout(() => {
     fireAlarm();
     resetAlarmFill();
@@ -428,11 +459,13 @@ function cancelAlarmHold() {
   clearTimeout(alarmHoldTimer);
   alarmHoldTimer = null;
   resetAlarmFill();
+  el.alarmSub.textContent = ALARM_IDLE_SUB;
 }
 
 function resetAlarmFill() {
-  el.alarmBtnFill.classList.remove('filling');
-  void el.alarmBtnFill.offsetWidth; // force reflow so the next hold restarts from empty
+  el.alarmBtnFill.style.transition = 'none';
+  el.alarmBtnFill.style.height = '0%';
+  void el.alarmBtnFill.offsetHeight;
 }
 
 function fireAlarm() {
@@ -495,25 +528,26 @@ function retryUnackedAlarms() {
 // ---- Rendering ----
 
 function render() {
-  el.timerSession.textContent = formatDuration(now() - state.session_start_ts);
+  const sessionTime = formatDuration(now() - state.session_start_ts);
+  el.timerSession.textContent = sessionTime;
+  el.chronoSessionTime.textContent = sessionTime;
 
   const pilote = currentPilote();
   el.pilotActuel.textContent = pilote ? pilote.nom : 'Aucun pilote sélectionné';
 
   el.tourBtn.disabled = !state.recording_active;
   el.tourBtn.classList.toggle('paused', !state.recording_active);
+  el.tourPausedTag.classList.toggle('hidden', state.recording_active);
   el.tourBtnHint.textContent = state.recording_active
-    ? 'Appuie à chaque passage'
+    ? 'Appuie à chaque passage sur la ligne'
     : 'Enregistrement en pause';
 
   if (state.recording_active) {
     el.recordingToggleBtn.textContent = 'STOP enregistrement';
-    el.recordingStatus.textContent = 'Enregistrement en cours';
-    el.recordingStatus.classList.remove('paused');
+    el.recordingToggleBtn.classList.remove('paused');
   } else {
     el.recordingToggleBtn.textContent = 'REPRENDRE enregistrement';
-    el.recordingStatus.textContent = 'Enregistrement en pause';
-    el.recordingStatus.classList.add('paused');
+    el.recordingToggleBtn.classList.add('paused');
   }
 
   el.undoBtn.disabled = state.laps.length === 0;
@@ -525,10 +559,12 @@ function render() {
   renderLapsList();
   renderPending();
   renderPairing();
+  renderPiloteList();
   renderConnectivity();
   renderRelais();
   renderDivergence();
   renderAlarmStatus();
+  el.navAlertDot.classList.toggle('hidden', !(state.rentre && state.rentre.actif));
 }
 
 function renderPending() {
@@ -541,7 +577,7 @@ function renderPending() {
     el.lapsPending.classList.add('hidden');
     return;
   }
-  el.lapsPending.textContent = `· ${pending} en attente d'envoi`;
+  el.lapsPending.textContent = `${pending} en attente`;
   el.lapsPending.classList.remove('hidden');
 }
 
@@ -558,13 +594,15 @@ function renderLapsList() {
   laps.forEach((lap) => {
     const index = state.laps.indexOf(lap) + 1;
     const li = document.createElement('li');
-    li.className = 'lap-item';
+    li.className = 'lap-row';
     const d = new Date(lap.timestamp);
     li.innerHTML = `
-      <span class="lap-num">#${index}</span>
-      <span class="lap-value">${formatDuration(lap.valeur_chrono, { tenths: true })}</span>
-      <span class="lap-pilote">${lap.pilote_vu_tel || '—'}</span>
-      <span class="lap-time">${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}</span>
+      <span class="lap-row__n">${index}</span>
+      <div class="lap-row__mid">
+        <div class="lap-row__t">${formatDuration(lap.valeur_chrono, { tenths: true })}</div>
+        <div class="lap-row__pilot">${lap.pilote_vu_tel || '—'}</div>
+      </div>
+      <span class="lap-row__clock">${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}</span>
     `;
     el.lapsList.appendChild(li);
   });
@@ -575,6 +613,27 @@ function renderPairing() {
   el.pairingJoin.classList.toggle('hidden', joined);
   el.pairingJoined.classList.toggle('hidden', !joined);
   el.pairingCodeDisplay.textContent = state.id_course || '—';
+}
+
+function renderPiloteList() {
+  el.pilotList.innerHTML = '';
+  if (state.pilotes.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'card-desc';
+    empty.style.margin = '0 0 4px';
+    empty.textContent = 'Aucun pilote enregistré. Ajoute-en un ci-dessous.';
+    el.pilotList.appendChild(empty);
+    return;
+  }
+  state.pilotes.forEach((p) => {
+    const cur = p.id === state.pilote_courant_id;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pilot-row-btn' + (cur ? ' current' : '');
+    btn.innerHTML = `<span class="pilot-row-btn__mark">${cur ? '●' : ''}</span><span class="pilot-row-btn__name">${p.nom}</span>`;
+    btn.addEventListener('click', () => selectPilote(p.id));
+    el.pilotList.appendChild(btn);
+  });
 }
 
 function renderRelais() {
@@ -590,14 +649,24 @@ function renderRelais() {
   const approx = snap.mode_alerte === 'tours';
   const active = !!(state.rentre && state.rentre.actif);
 
-  el.relaisCard.classList.toggle('active', active);
+  el.relaisCard.classList.toggle('urgent', active);
   el.relaisCard.classList.toggle('paused', state.pause && !active);
+  el.relaisRentreTag.classList.toggle('hidden', !active);
   el.relaisLabel.textContent = active
-    ? 'RENTRE AU STAND'
+    ? 'Fin de relais'
     : state.pause
       ? 'Fin de relais (en pause)'
       : 'Fin de relais';
-  el.relaisCountdown.textContent = (approx ? '≈ ' : '') + formatDuration(remainingMs);
+
+  if (approx) {
+    // "tours restants" display per design spec — falls back to an
+    // approximate time countdown if the PC hasn't published a tour count yet.
+    el.relaisCountdown.textContent = typeof snap.tours_restants === 'number'
+      ? `≈ ${snap.tours_restants}`
+      : `≈ ${formatDuration(remainingMs)}`;
+  } else {
+    el.relaisCountdown.textContent = formatDuration(remainingMs);
+  }
 
   if (state.course_snapshot && state.course_snapshot.fin_ts) {
     el.courseCountdownLine.classList.remove('hidden');
@@ -610,7 +679,7 @@ function renderRelais() {
 function renderDivergence() {
   const pilote = currentPilote();
   if (state.pc_pilote_courant && pilote && pilote.nom !== state.pc_pilote_courant) {
-    el.piloteDivergence.textContent = `⚠ PC indique : ${state.pc_pilote_courant}`;
+    el.piloteDivergence.innerHTML = `<span>⚠</span><span>PC indique : ${state.pc_pilote_courant}</span>`;
     el.piloteDivergence.classList.remove('hidden');
   } else {
     el.piloteDivergence.classList.add('hidden');
@@ -625,13 +694,13 @@ function renderAlarmStatus() {
   }
   el.alarmStatus.classList.remove('hidden', 'sending', 'acked', 'unsent');
   if (last.acked) {
-    el.alarmStatus.textContent = 'PC prévenu ✓';
+    el.alarmStatus.innerHTML = '<span>✓</span><span>PC prévenu</span>';
     el.alarmStatus.classList.add('acked');
   } else if (!state.id_course || !transport.isConfigured() || !transport.isConnected()) {
-    el.alarmStatus.textContent = 'Non remis (réseau) — repli voix/radio';
+    el.alarmStatus.innerHTML = '<span>⚠</span><span>Non remis (réseau)</span>';
     el.alarmStatus.classList.add('unsent');
   } else {
-    el.alarmStatus.textContent = 'Envoi…';
+    el.alarmStatus.innerHTML = '<span>◴</span><span>Envoi…</span>';
     el.alarmStatus.classList.add('sending');
   }
 }
@@ -642,7 +711,6 @@ function maybeSignalRentre() {
     el.rentreBanner.classList.add('hidden');
     return;
   }
-  el.rentreBanner.textContent = '🚩 RENTRE AU STAND';
   el.rentreBanner.classList.remove('hidden');
   if (r.ts !== lastFlashedRentreTs) {
     lastFlashedRentreTs = r.ts;
@@ -652,42 +720,10 @@ function maybeSignalRentre() {
   }
 }
 
-// ---- Pilote modal ----
-
-function openPiloteModal() {
-  renderPiloteModal();
-  el.pilotModal.classList.remove('hidden');
-  el.pilotAddInput.focus();
-}
-
-function closePiloteModal() {
-  el.pilotModal.classList.add('hidden');
-  el.pilotAddForm.reset();
-}
-
-function renderPiloteModal() {
-  el.pilotList.innerHTML = '';
-  if (state.pilotes.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'pilote-list-empty';
-    empty.textContent = 'Aucun pilote enregistré. Ajoute-en un ci-dessous.';
-    el.pilotList.appendChild(empty);
-    return;
-  }
-  state.pilotes.forEach((p) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'pilote-option';
-    if (p.id === state.pilote_courant_id) btn.classList.add('selected');
-    btn.textContent = p.nom + (p.id === state.pilote_courant_id ? ' (actuel)' : '');
-    btn.addEventListener('click', () => selectPilote(p.id));
-    el.pilotList.appendChild(btn);
-  });
-}
-
 // ---- Confirm modal ----
 
-function openConfirm(message, onConfirm) {
+function openConfirm(title, message, onConfirm) {
+  el.confirmTitle.textContent = title;
   el.confirmMessage.textContent = message;
   confirmCallback = onConfirm;
   el.confirmModal.classList.remove('hidden');
@@ -698,24 +734,9 @@ function closeConfirm() {
   confirmCallback = null;
 }
 
-// ---- Settings modal (relay/transport config) ----
+// ---- Settings (relay/transport config) ----
 
-function openSettings() {
-  const cfg = transport.loadTransportConfig();
-  el.settingsConfigInput.value = cfg ? JSON.stringify(cfg, null, 2) : '';
-  el.settingsError.classList.add('hidden');
-  el.settingsModal.classList.remove('hidden');
-}
-
-function closeSettings() {
-  el.settingsModal.classList.add('hidden');
-}
-
-// Locates the { ... } object literal that contains "databaseURL", walking
-// out to its enclosing braces. This lets the user paste Firebase's full
-// setup snippet as-is (imports, comments, initializeApp(...) call and all)
-// instead of having to trim it down to just the config object by hand.
-function extractConfigObjectLiteral(raw) {
+function parseFirebaseConfigInput(raw) {
   const markerIndex = raw.indexOf('databaseURL');
   if (markerIndex === -1) throw new Error('databaseURL introuvable dans le texte collé');
 
@@ -741,11 +762,7 @@ function extractConfigObjectLiteral(raw) {
   }
   if (end === -1) throw new Error('accolade fermante du bloc de config introuvable');
 
-  return raw.slice(start, end + 1);
-}
-
-function parseFirebaseConfigInput(raw) {
-  const objLiteral = extractConfigObjectLiteral(raw);
+  const objLiteral = raw.slice(start, end + 1);
   // Accepts both strict JSON and the JS object literal Firebase's console
   // hands out (unquoted keys) — safe here since it only ever runs text the
   // user pasted into their own browser.
@@ -762,13 +779,13 @@ function saveSettings() {
     clearSettings();
     return;
   }
+  el.settingsError.classList.add('hidden');
   try {
     const cfg = parseFirebaseConfigInput(raw);
     transport.saveTransportConfig(cfg);
-    closeSettings();
     renderConnectivity();
     if (state.id_course) subscribeToCourse();
-    showToast('Config relais enregistrée.');
+    showToast('Relais configuré ✓');
   } catch (err) {
     el.settingsError.textContent = 'Config invalide : ' + err.message;
     el.settingsError.classList.remove('hidden');
@@ -778,33 +795,32 @@ function saveSettings() {
 function clearSettings() {
   transport.clearTransportConfig();
   el.settingsConfigInput.value = '';
-  closeSettings();
+  el.settingsError.classList.add('hidden');
   renderConnectivity();
   showToast('Config relais effacée — l’appli reste utilisable en local.');
 }
 
 // ---- Wiring ----
 
+for (const btn of el.navRail.querySelectorAll('.nav-item')) {
+  btn.addEventListener('click', () => goToPage(btn.dataset.page));
+}
+
 el.tourBtn.addEventListener('click', recordLap);
 el.undoBtn.addEventListener('click', undoLastLap);
 el.recordingToggleBtn.addEventListener('click', toggleRecording);
-el.changePilotBtn.addEventListener('click', openPiloteModal);
-el.pilotModalClose.addEventListener('click', closePiloteModal);
-el.pilotModal.addEventListener('click', (e) => {
-  if (e.target === el.pilotModal) closePiloteModal();
-});
 el.pilotAddForm.addEventListener('submit', (e) => {
   e.preventDefault();
   addPilote(el.pilotAddInput.value);
   el.pilotAddInput.value = '';
-  el.pilotAddInput.focus();
 });
 
 el.exportBtn.addEventListener('click', exportSession);
 
 el.resetBtn.addEventListener('click', () => {
   openConfirm(
-    'Nouvelle session : les tours locaux non exportés seront perdus. Confirmer ?',
+    'Nouvelle session ?',
+    'Tous les tours enregistrés localement seront effacés. Pense à exporter avant si besoin.',
     resetSession
   );
 });
@@ -826,15 +842,7 @@ el.pairingCodeInput.addEventListener('keydown', (e) => {
 el.pairingChangeBtn.addEventListener('click', changeCourse);
 el.pairingScanBtn.addEventListener('click', openQrScan);
 el.qrCancelBtn.addEventListener('click', closeQrScan);
-el.qrModal.addEventListener('click', (e) => {
-  if (e.target === el.qrModal) closeQrScan();
-});
 
-el.settingsBtn.addEventListener('click', openSettings);
-el.settingsCloseBtn.addEventListener('click', closeSettings);
-el.settingsModal.addEventListener('click', (e) => {
-  if (e.target === el.settingsModal) closeSettings();
-});
 el.settingsSaveBtn.addEventListener('click', saveSettings);
 el.settingsClearBtn.addEventListener('click', clearSettings);
 
@@ -848,10 +856,8 @@ el.rentreBanner.addEventListener('click', () => el.rentreOverlay.classList.remov
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    closePiloteModal();
     closeConfirm();
     closeQrScan();
-    closeSettings();
   }
 });
 
@@ -877,9 +883,13 @@ transport.onConnectivityChange(() => {
   flushLapQueue();
 });
 el.pairingScanBtn.classList.toggle('hidden', !supportsQr());
+el.settingsConfigInput.value = transport.loadTransportConfig()
+  ? JSON.stringify(transport.loadTransportConfig(), null, 2)
+  : '';
 if (state.id_course) subscribeToCourse();
 state.alarms.filter((a) => !a.acked).forEach((a) => listenAlarmAckIfNeeded(a));
 
+goToPage('accueil');
 render();
 maybeSignalRentre(); // restore banner/flash if still active after a refresh
 setInterval(render, 500);
