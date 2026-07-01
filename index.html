@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Bord de piste">
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="stylesheet" href="./css/style.css">
+<title>Bord de piste — Chronos</title>
+</head>
+<body>
+
+<header class="app-header">
+  <h1>Bord de piste</h1>
+  <p class="app-subtitle">Saisie locale — export JSON manuel (secours USB)</p>
+</header>
+
+<main>
+
+  <section class="timer-card">
+    <span class="timer-label">Durée de session</span>
+    <span id="timer-session" class="timer-value">0:00</span>
+  </section>
+
+  <section class="pilote-card">
+    <div class="pilote-info">
+      <span class="pilote-label">Pilote en cours</span>
+      <span id="pilote-actuel" class="pilote-value">Aucun pilote sélectionné</span>
+    </div>
+    <button id="change-pilote-btn" type="button" class="btn btn-secondary">
+      Changer le pilote
+    </button>
+  </section>
+
+  <section class="tour-section">
+    <button id="tour-btn" type="button" class="btn-tour">
+      TOUR
+    </button>
+    <p id="tour-btn-hint" class="tour-hint">Appuie à chaque passage</p>
+    <p class="last-lap">Dernier tour : <span id="last-lap-value">—</span></p>
+  </section>
+
+  <section class="controls-row">
+    <button id="recording-toggle-btn" type="button" class="btn btn-warning">
+      STOP enregistrement
+    </button>
+    <button id="undo-btn" type="button" class="btn btn-outline" disabled>
+      Annuler dernier tour
+    </button>
+  </section>
+
+  <p id="recording-status" class="recording-status">Enregistrement en cours</p>
+
+  <section class="laps-section">
+    <div class="laps-header">
+      <h2>Derniers tours</h2>
+      <span class="laps-count-badge"><span id="laps-count">0</span> au total</span>
+    </div>
+    <ul id="laps-list" class="laps-list"></ul>
+  </section>
+
+  <section class="footer-actions">
+    <button id="export-btn" type="button" class="btn btn-primary">
+      Exporter (secours USB)
+    </button>
+    <button id="reset-btn" type="button" class="btn btn-danger-outline">
+      Nouvelle session
+    </button>
+  </section>
+
+</main>
+
+<!-- Pilot selection / correction modal -->
+<div id="pilote-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <h2>Tu penses que le mec sur la moto n'est pas le bon ?</h2>
+    <p class="modal-subtitle">Sélectionne le pilote réellement sur la moto.</p>
+    <div id="pilote-list" class="pilote-list"></div>
+    <form id="pilote-add-form" class="pilote-add-form">
+      <input id="pilote-add-input" type="text" placeholder="Nom du pilote" autocomplete="off" required>
+      <button type="submit" class="btn btn-secondary">Ajouter</button>
+    </form>
+    <button id="pilote-modal-close" type="button" class="btn btn-outline modal-close">Fermer</button>
+  </div>
+</div>
+
+<!-- Generic confirmation modal -->
+<div id="confirm-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <p id="confirm-message" class="modal-subtitle"></p>
+    <div class="confirm-actions">
+      <button id="confirm-cancel" type="button" class="btn btn-outline">Annuler</button>
+      <button id="confirm-ok" type="button" class="btn btn-danger">Confirmer</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
