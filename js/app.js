@@ -1,12 +1,25 @@
 import { now } from './now.js';
 import { generateId, loadState, saveState, createDefaultState } from './storage.js';
+import * as transport from './transport.js';
+import { beep, vibrate } from './signals.js';
 
 let state = loadState();
 let confirmCallback = null;
+let pairingEditMode = false;
+let lastFlashedRentreTs = null;
+let stateUnsubscribe = null;
+let flushingLaps = false;
+let alarmHoldTimer = null;
+const alarmAckUnsubscribes = new Map();
+let qrStream = null;
+let qrRafId = null;
+
+const ALARM_HOLD_MS = 600;
 
 const el = {
   timerSession: document.getElementById('timer-session'),
   pilotActuel: document.getElementById('pilote-actuel'),
+  piloteDivergence: document.getElementById('pilote-divergence'),
   tourBtn: document.getElementById('tour-btn'),
   tourBtnHint: document.getElementById('tour-btn-hint'),
   lastLapValue: document.getElementById('last-lap-value'),
@@ -15,6 +28,7 @@ const el = {
   undoBtn: document.getElementById('undo-btn'),
   lapsList: document.getElementById('laps-list'),
   lapsCount: document.getElementById('laps-count'),
+  lapsPending: document.getElementById('laps-pending'),
   exportBtn: document.getElementById('export-btn'),
   resetBtn: document.getElementById('reset-btn'),
   changePilotBtn: document.getElementById('change-pilote-btn'),
@@ -31,6 +45,43 @@ const el = {
   confirmCancel: document.getElementById('confirm-cancel'),
 
   toast: document.getElementById('toast'),
+
+  connectivityDot: document.getElementById('connectivity-dot'),
+  connectivityLabel: document.getElementById('connectivity-label'),
+  settingsBtn: document.getElementById('settings-btn'),
+
+  pairingJoin: document.getElementById('pairing-join'),
+  pairingJoined: document.getElementById('pairing-joined'),
+  pairingCodeInput: document.getElementById('pairing-code-input'),
+  pairingScanBtn: document.getElementById('pairing-scan-btn'),
+  pairingJoinBtn: document.getElementById('pairing-join-btn'),
+  pairingCodeDisplay: document.getElementById('pairing-code-display'),
+  pairingChangeBtn: document.getElementById('pairing-change-btn'),
+
+  qrModal: document.getElementById('qr-modal'),
+  qrVideo: document.getElementById('qr-video'),
+  qrCancelBtn: document.getElementById('qr-cancel-btn'),
+
+  settingsModal: document.getElementById('settings-modal'),
+  settingsConfigInput: document.getElementById('settings-config-input'),
+  settingsError: document.getElementById('settings-error'),
+  settingsSaveBtn: document.getElementById('settings-save-btn'),
+  settingsClearBtn: document.getElementById('settings-clear-btn'),
+  settingsCloseBtn: document.getElementById('settings-close-btn'),
+
+  alarmBtn: document.getElementById('alarm-btn'),
+  alarmBtnFill: document.getElementById('alarm-btn-fill'),
+  alarmStatus: document.getElementById('alarm-status'),
+
+  relaisCard: document.getElementById('relais-card'),
+  relaisLabel: document.getElementById('relais-label'),
+  relaisCountdown: document.getElementById('relais-countdown'),
+  courseCountdownLine: document.getElementById('course-countdown-line'),
+  courseCountdown: document.getElementById('course-countdown'),
+
+  rentreBanner: document.getElementById('rentre-banner'),
+  rentreOverlay: document.getElementById('rentre-overlay'),
+  rentreOverlayOk: document.getElementById('rentre-overlay-ok'),
 };
 
 function persist() {
@@ -70,7 +121,7 @@ function showToast(message) {
   showToast._t = setTimeout(() => el.toast.classList.remove('visible'), 2200);
 }
 
-// ---- Core actions ----
+// ---- Core actions (Phase A) ----
 
 function recordLap() {
   if (!state.recording_active) return;
@@ -92,11 +143,13 @@ function recordLap() {
   state.last_lap_ts = t;
   persist();
   render();
+  flushLapQueue();
 }
 
 function undoLastLap() {
   if (state.laps.length === 0) return;
-  state.laps.pop();
+  const removed = state.laps.pop();
+  state.synced_lap_ids = state.synced_lap_ids.filter((id) => id !== removed.id_unique);
   state.last_lap_ts = state.laps.length
     ? state.laps[state.laps.length - 1].timestamp
     : null;
@@ -148,6 +201,12 @@ function selectPilote(id) {
 }
 
 function resetSession() {
+  teardownCourseSubscription();
+  alarmAckUnsubscribes.forEach((unsub) => unsub());
+  alarmAckUnsubscribes.clear();
+  lastFlashedRentreTs = null;
+  pairingEditMode = false;
+
   const keepPilotes = state.pilotes;
   const keepCurrent = state.pilote_courant_id;
   state = createDefaultState();
@@ -184,6 +243,255 @@ function exportSession() {
   showToast(`Export : ${filename}`);
 }
 
+// ---- Pairing (§16.3) ----
+
+function normalizeCode(raw) {
+  return raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+}
+
+function joinCourse(rawCode) {
+  const code = normalizeCode(rawCode);
+  if (!code) {
+    showToast('Code invalide.');
+    return;
+  }
+  // Laps recorded before pairing haven't been sent anywhere yet: attach
+  // them to this course instead of leaving them orphaned.
+  state.laps.forEach((lap) => {
+    if (!lap.id_course) lap.id_course = code;
+  });
+  state.id_course = code;
+  state.paired_ts = now();
+  pairingEditMode = false;
+  persist();
+  render();
+  subscribeToCourse();
+  showToast(`Course rejointe : ${code}`);
+}
+
+function changeCourse() {
+  pairingEditMode = true;
+  el.pairingCodeInput.value = state.id_course || '';
+  render();
+  el.pairingCodeInput.focus();
+}
+
+function supportsQr() {
+  return 'BarcodeDetector' in window;
+}
+
+function extractCodeFromScan(text) {
+  const match = text.match(/[A-Za-z0-9]{4,8}/);
+  return match ? match[0] : text;
+}
+
+async function openQrScan() {
+  if (!supportsQr()) {
+    showToast('Scan QR non supporté sur cet appareil.');
+    return;
+  }
+  try {
+    qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    el.qrVideo.srcObject = qrStream;
+    await el.qrVideo.play();
+    el.qrModal.classList.remove('hidden');
+    const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+    const tick = async () => {
+      if (!qrStream) return;
+      try {
+        const codes = await detector.detect(el.qrVideo);
+        if (codes.length > 0) {
+          const text = codes[0].rawValue || '';
+          closeQrScan();
+          joinCourse(extractCodeFromScan(text));
+          return;
+        }
+      } catch (err) {
+        console.error('Lecture QR échouée', err);
+      }
+      qrRafId = requestAnimationFrame(tick);
+    };
+    qrRafId = requestAnimationFrame(tick);
+  } catch (err) {
+    console.error('Caméra indisponible', err);
+    showToast('Caméra indisponible ou permission refusée.');
+    closeQrScan();
+  }
+}
+
+function closeQrScan() {
+  if (qrRafId) cancelAnimationFrame(qrRafId);
+  qrRafId = null;
+  if (qrStream) {
+    qrStream.getTracks().forEach((track) => track.stop());
+    qrStream = null;
+  }
+  el.qrVideo.srcObject = null;
+  el.qrModal.classList.add('hidden');
+}
+
+// ---- Transport: connectivity + PC state (§16.8) ----
+
+function renderConnectivity() {
+  const configured = transport.isConfigured();
+  const connected = transport.isConnected();
+  el.connectivityDot.className = 'connectivity-dot ' + (!configured ? 'unconfigured' : connected ? 'connected' : 'disconnected');
+  el.connectivityLabel.textContent = !configured
+    ? 'Relais non configuré'
+    : connected ? 'Relais connecté' : 'Relais hors ligne';
+}
+
+function subscribeToCourse() {
+  teardownCourseSubscription();
+  if (!state.id_course || !transport.isConfigured()) return;
+  stateUnsubscribe = transport.listenState(state.id_course, onPcState);
+  flushLapQueue();
+}
+
+function teardownCourseSubscription() {
+  if (stateUnsubscribe) {
+    stateUnsubscribe();
+    stateUnsubscribe = null;
+  }
+}
+
+function mergePcRoster(names) {
+  names.forEach((nom) => {
+    if (typeof nom !== 'string' || !nom.trim()) return;
+    const exists = state.pilotes.some((p) => p.nom === nom);
+    if (!exists) state.pilotes.push({ id: generateId(), nom });
+  });
+}
+
+function adoptPcPiloteIfNone(nom) {
+  if (state.pilote_courant_id) return;
+  const pilote = state.pilotes.find((p) => p.nom === nom);
+  if (pilote) state.pilote_courant_id = pilote.id;
+}
+
+function onPcState(raw) {
+  if (!raw) return; // nothing published yet — keep current fallback UI
+  if (Array.isArray(raw.roster)) {
+    mergePcRoster(raw.roster);
+    state.pc_roster = raw.roster;
+  }
+  state.pc_pilote_courant = typeof raw.pilote_courant === 'string' ? raw.pilote_courant : null;
+  if (state.pc_pilote_courant) adoptPcPiloteIfNone(state.pc_pilote_courant);
+  state.relais_snapshot = raw.relais || null;
+  state.course_snapshot = raw.course || null;
+  state.pause = !!raw.pause;
+  state.rentre = raw.rentre || null;
+  state.pc_state_recv_ts = now();
+  persist();
+  render();
+  maybeSignalRentre();
+}
+
+// ---- Lap send queue (§16.6) — idempotent by id_unique, USB/relay coexist ----
+
+async function flushLapQueue() {
+  if (flushingLaps) return;
+  if (!transport.isConfigured() || !state.id_course) return;
+  flushingLaps = true;
+  try {
+    const pending = state.laps.filter(
+      (l) => l.id_course && !state.synced_lap_ids.includes(l.id_unique)
+    );
+    for (const lap of pending) {
+      try {
+        await transport.pushLap(state.id_course, lap);
+        state.synced_lap_ids.push(lap.id_unique);
+        persist();
+      } catch (err) {
+        // Stays pending; the periodic retry loop will pick it up again.
+      }
+    }
+  } finally {
+    flushingLaps = false;
+    render();
+  }
+}
+
+// ---- ALARME (§16.7) — fast lane, bypasses the lap queue ----
+
+function startAlarmHold(e) {
+  e.preventDefault();
+  el.alarmBtnFill.style.setProperty('--alarm-hold-ms', `${ALARM_HOLD_MS}ms`);
+  el.alarmBtnFill.classList.add('filling');
+  alarmHoldTimer = setTimeout(() => {
+    fireAlarm();
+    resetAlarmFill();
+  }, ALARM_HOLD_MS);
+}
+
+function cancelAlarmHold() {
+  clearTimeout(alarmHoldTimer);
+  alarmHoldTimer = null;
+  resetAlarmFill();
+}
+
+function resetAlarmFill() {
+  el.alarmBtnFill.classList.remove('filling');
+  void el.alarmBtnFill.offsetWidth; // force reflow so the next hold restarts from empty
+}
+
+function fireAlarm() {
+  const alarm = {
+    id_unique: generateId(),
+    id_course: state.id_course,
+    timestamp: now(),
+    type: 'ALERTE',
+    acked: false,
+    ack_ts: null,
+  };
+  state.alarms.push(alarm);
+  if (state.alarms.length > 5) state.alarms = state.alarms.slice(-5);
+  persist();
+  render();
+  vibrate([80]);
+  sendAlarm(alarm);
+}
+
+function listenAlarmAckIfNeeded(alarm) {
+  if (!state.id_course || alarmAckUnsubscribes.has(alarm.id_unique)) return;
+  const unsub = transport.listenAlarmAck(state.id_course, alarm.id_unique, (ackVal) => {
+    if (!ackVal) return;
+    const found = state.alarms.find((a) => a.id_unique === alarm.id_unique);
+    if (found && !found.acked) {
+      found.acked = true;
+      found.ack_ts = ackVal.timestamp || now();
+      persist();
+      render();
+      beep({ frequency: 520, times: 1 });
+    }
+  });
+  alarmAckUnsubscribes.set(alarm.id_unique, unsub);
+}
+
+async function sendAlarm(alarm) {
+  if (!state.id_course) {
+    render(); // derived status will read "Non remis (réseau)"
+    return;
+  }
+  listenAlarmAckIfNeeded(alarm);
+  try {
+    await transport.pushAlarm(state.id_course, alarm);
+  } catch (err) {
+    // Retried by the interval loop below until acked.
+  }
+  render();
+}
+
+function retryUnackedAlarms() {
+  if (!transport.isConfigured() || !state.id_course) return;
+  state.alarms
+    .filter((a) => !a.acked)
+    .forEach((a) => {
+      listenAlarmAckIfNeeded(a);
+      transport.pushAlarm(state.id_course, a).catch(() => {});
+    });
+}
+
 // ---- Rendering ----
 
 function render() {
@@ -215,6 +523,26 @@ function render() {
   el.lastLapValue.textContent = lastLap ? formatDuration(lastLap.valeur_chrono, { tenths: true }) : '—';
 
   renderLapsList();
+  renderPending();
+  renderPairing();
+  renderConnectivity();
+  renderRelais();
+  renderDivergence();
+  renderAlarmStatus();
+}
+
+function renderPending() {
+  if (!state.id_course) {
+    el.lapsPending.classList.add('hidden');
+    return;
+  }
+  const pending = state.laps.filter((l) => !state.synced_lap_ids.includes(l.id_unique)).length;
+  if (pending === 0) {
+    el.lapsPending.classList.add('hidden');
+    return;
+  }
+  el.lapsPending.textContent = `· ${pending} en attente d'envoi`;
+  el.lapsPending.classList.remove('hidden');
 }
 
 function renderLapsList() {
@@ -240,6 +568,88 @@ function renderLapsList() {
     `;
     el.lapsList.appendChild(li);
   });
+}
+
+function renderPairing() {
+  const joined = !!state.id_course && !pairingEditMode;
+  el.pairingJoin.classList.toggle('hidden', joined);
+  el.pairingJoined.classList.toggle('hidden', !joined);
+  el.pairingCodeDisplay.textContent = state.id_course || '—';
+}
+
+function renderRelais() {
+  const snap = state.relais_snapshot;
+  if (!snap || !snap.cible_fin_ts) {
+    el.relaisCard.classList.add('hidden');
+    return;
+  }
+  el.relaisCard.classList.remove('hidden');
+  const remainingMs = state.pause
+    ? snap.cible_fin_ts - (state.pc_state_recv_ts ?? now())
+    : snap.cible_fin_ts - now();
+  const approx = snap.mode_alerte === 'tours';
+  const active = !!(state.rentre && state.rentre.actif);
+
+  el.relaisCard.classList.toggle('active', active);
+  el.relaisCard.classList.toggle('paused', state.pause && !active);
+  el.relaisLabel.textContent = active
+    ? 'RENTRE AU STAND'
+    : state.pause
+      ? 'Fin de relais (en pause)'
+      : 'Fin de relais';
+  el.relaisCountdown.textContent = (approx ? '≈ ' : '') + formatDuration(remainingMs);
+
+  if (state.course_snapshot && state.course_snapshot.fin_ts) {
+    el.courseCountdownLine.classList.remove('hidden');
+    el.courseCountdown.textContent = formatDuration(Math.max(0, state.course_snapshot.fin_ts - now()));
+  } else {
+    el.courseCountdownLine.classList.add('hidden');
+  }
+}
+
+function renderDivergence() {
+  const pilote = currentPilote();
+  if (state.pc_pilote_courant && pilote && pilote.nom !== state.pc_pilote_courant) {
+    el.piloteDivergence.textContent = `⚠ PC indique : ${state.pc_pilote_courant}`;
+    el.piloteDivergence.classList.remove('hidden');
+  } else {
+    el.piloteDivergence.classList.add('hidden');
+  }
+}
+
+function renderAlarmStatus() {
+  const last = state.alarms[state.alarms.length - 1];
+  if (!last) {
+    el.alarmStatus.classList.add('hidden');
+    return;
+  }
+  el.alarmStatus.classList.remove('hidden', 'sending', 'acked', 'unsent');
+  if (last.acked) {
+    el.alarmStatus.textContent = 'PC prévenu ✓';
+    el.alarmStatus.classList.add('acked');
+  } else if (!state.id_course || !transport.isConfigured() || !transport.isConnected()) {
+    el.alarmStatus.textContent = 'Non remis (réseau) — repli voix/radio';
+    el.alarmStatus.classList.add('unsent');
+  } else {
+    el.alarmStatus.textContent = 'Envoi…';
+    el.alarmStatus.classList.add('sending');
+  }
+}
+
+function maybeSignalRentre() {
+  const r = state.rentre;
+  if (!r || !r.actif) {
+    el.rentreBanner.classList.add('hidden');
+    return;
+  }
+  el.rentreBanner.textContent = '🚩 RENTRE AU STAND';
+  el.rentreBanner.classList.remove('hidden');
+  if (r.ts !== lastFlashedRentreTs) {
+    lastFlashedRentreTs = r.ts;
+    el.rentreOverlay.classList.remove('hidden');
+    beep({ frequency: 660, times: 3 });
+    vibrate([200, 100, 200, 100, 400]);
+  }
 }
 
 // ---- Pilote modal ----
@@ -288,6 +698,61 @@ function closeConfirm() {
   confirmCallback = null;
 }
 
+// ---- Settings modal (relay/transport config) ----
+
+function openSettings() {
+  const cfg = transport.loadTransportConfig();
+  el.settingsConfigInput.value = cfg ? JSON.stringify(cfg, null, 2) : '';
+  el.settingsError.classList.add('hidden');
+  el.settingsModal.classList.remove('hidden');
+}
+
+function closeSettings() {
+  el.settingsModal.classList.add('hidden');
+}
+
+function parseFirebaseConfigInput(raw) {
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('objet de config introuvable');
+  const objLiteral = raw.slice(start, end + 1);
+  // Accepts both strict JSON and the JS object literal Firebase's console
+  // hands out (unquoted keys) — safe here since it only ever runs text the
+  // user pasted into their own browser.
+  const cfg = new Function(`"use strict"; return (${objLiteral});`)();
+  if (!cfg || typeof cfg !== 'object' || !cfg.databaseURL) {
+    throw new Error('databaseURL manquant dans la config');
+  }
+  return cfg;
+}
+
+function saveSettings() {
+  const raw = el.settingsConfigInput.value.trim();
+  if (!raw) {
+    clearSettings();
+    return;
+  }
+  try {
+    const cfg = parseFirebaseConfigInput(raw);
+    transport.saveTransportConfig(cfg);
+    closeSettings();
+    renderConnectivity();
+    if (state.id_course) subscribeToCourse();
+    showToast('Config relais enregistrée.');
+  } catch (err) {
+    el.settingsError.textContent = 'Config invalide : ' + err.message;
+    el.settingsError.classList.remove('hidden');
+  }
+}
+
+function clearSettings() {
+  transport.clearTransportConfig();
+  el.settingsConfigInput.value = '';
+  closeSettings();
+  renderConnectivity();
+  showToast('Config relais effacée — l’appli reste utilisable en local.');
+}
+
 // ---- Wiring ----
 
 el.tourBtn.addEventListener('click', recordLap);
@@ -324,15 +789,47 @@ el.confirmModal.addEventListener('click', (e) => {
   if (e.target === el.confirmModal) closeConfirm();
 });
 
+el.pairingJoinBtn.addEventListener('click', () => joinCourse(el.pairingCodeInput.value));
+el.pairingCodeInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') joinCourse(el.pairingCodeInput.value);
+});
+el.pairingChangeBtn.addEventListener('click', changeCourse);
+el.pairingScanBtn.addEventListener('click', openQrScan);
+el.qrCancelBtn.addEventListener('click', closeQrScan);
+el.qrModal.addEventListener('click', (e) => {
+  if (e.target === el.qrModal) closeQrScan();
+});
+
+el.settingsBtn.addEventListener('click', openSettings);
+el.settingsCloseBtn.addEventListener('click', closeSettings);
+el.settingsModal.addEventListener('click', (e) => {
+  if (e.target === el.settingsModal) closeSettings();
+});
+el.settingsSaveBtn.addEventListener('click', saveSettings);
+el.settingsClearBtn.addEventListener('click', clearSettings);
+
+el.alarmBtn.addEventListener('pointerdown', startAlarmHold);
+['pointerup', 'pointerleave', 'pointercancel'].forEach((evt) =>
+  el.alarmBtn.addEventListener(evt, cancelAlarmHold)
+);
+
+el.rentreOverlayOk.addEventListener('click', () => el.rentreOverlay.classList.add('hidden'));
+el.rentreBanner.addEventListener('click', () => el.rentreOverlay.classList.remove('hidden'));
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closePiloteModal();
     closeConfirm();
+    closeQrScan();
+    closeSettings();
   }
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) render();
+  if (!document.hidden) {
+    render();
+    flushLapQueue();
+  }
 });
 
 if ('serviceWorker' in navigator) {
@@ -343,6 +840,19 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// ---- Startup ----
+
+transport.onConnectivityChange(() => {
+  renderConnectivity();
+  flushLapQueue();
+});
+el.pairingScanBtn.classList.toggle('hidden', !supportsQr());
+if (state.id_course) subscribeToCourse();
+state.alarms.filter((a) => !a.acked).forEach((a) => listenAlarmAckIfNeeded(a));
+
 render();
+maybeSignalRentre(); // restore banner/flash if still active after a refresh
 setInterval(render, 500);
+setInterval(flushLapQueue, 6000);
+setInterval(retryUnackedAlarms, 3000);
 persist();

@@ -16,10 +16,18 @@
 </head>
 <body>
 
+<div id="rentre-banner" class="rentre-banner hidden"></div>
+
 <header class="app-header">
   <h1>Bord de piste</h1>
   <p class="app-subtitle">Saisie locale — export JSON manuel (secours USB)</p>
 </header>
+
+<div class="status-bar">
+  <span id="connectivity-dot" class="connectivity-dot"></span>
+  <span id="connectivity-label" class="connectivity-label">Non configuré</span>
+  <button id="settings-btn" type="button" class="icon-btn" aria-label="Réglages relais">⚙</button>
+</div>
 
 <main>
 
@@ -28,14 +36,50 @@
     <span id="timer-session" class="timer-value">0:00</span>
   </section>
 
+  <section id="pairing-card" class="pairing-card">
+    <div id="pairing-join" class="pairing-join">
+      <span class="pairing-label">Rejoindre une course</span>
+      <div class="pairing-join-row">
+        <input id="pairing-code-input" type="text" maxlength="8" placeholder="CODE" autocomplete="off" class="pairing-input">
+        <button id="pairing-scan-btn" type="button" class="btn btn-secondary pairing-scan-btn hidden">Scanner QR</button>
+      </div>
+      <button id="pairing-join-btn" type="button" class="btn btn-primary">Rejoindre</button>
+    </div>
+    <div id="pairing-joined" class="pairing-joined hidden">
+      <div class="pairing-joined-info">
+        <span class="pairing-label">Course</span>
+        <span id="pairing-code-display" class="pairing-code-display">—</span>
+      </div>
+      <button id="pairing-change-btn" type="button" class="btn btn-outline btn-small">Changer</button>
+    </div>
+  </section>
+
   <section class="pilote-card">
     <div class="pilote-info">
       <span class="pilote-label">Pilote en cours</span>
       <span id="pilote-actuel" class="pilote-value">Aucun pilote sélectionné</span>
+      <span id="pilote-divergence" class="pilote-divergence hidden"></span>
     </div>
     <button id="change-pilote-btn" type="button" class="btn btn-secondary">
       Changer le pilote
     </button>
+  </section>
+
+  <section class="alarm-section">
+    <button id="alarm-btn" type="button" class="btn-alarm">
+      <span id="alarm-btn-fill" class="alarm-btn-fill"></span>
+      <span class="alarm-btn-label">ALERTE</span>
+    </button>
+    <p class="alarm-hint">Maintenir appuyé pour prévenir le PC</p>
+    <p id="alarm-status" class="alarm-status hidden"></p>
+  </section>
+
+  <section id="relais-card" class="relais-card hidden">
+    <span id="relais-label" class="relais-label">Fin de relais</span>
+    <span id="relais-countdown" class="relais-countdown">--:--</span>
+    <span id="course-countdown-line" class="course-countdown-line hidden">
+      Fin de course dans <span id="course-countdown">--:--</span>
+    </span>
   </section>
 
   <section class="tour-section">
@@ -61,6 +105,7 @@
     <div class="laps-header">
       <h2>Derniers tours</h2>
       <span class="laps-count-badge"><span id="laps-count">0</span> au total</span>
+      <span id="laps-pending" class="laps-pending hidden"></span>
     </div>
     <ul id="laps-list" class="laps-list"></ul>
   </section>
@@ -98,6 +143,44 @@
       <button id="confirm-cancel" type="button" class="btn btn-outline">Annuler</button>
       <button id="confirm-ok" type="button" class="btn btn-danger">Confirmer</button>
     </div>
+  </div>
+</div>
+
+<!-- QR pairing scan modal -->
+<div id="qr-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <h2>Scanner le QR code</h2>
+    <p class="modal-subtitle">Vise le QR code affiché sur le PC de stand.</p>
+    <video id="qr-video" class="qr-video" playsinline muted></video>
+    <button id="qr-cancel-btn" type="button" class="btn btn-outline">Annuler</button>
+  </div>
+</div>
+
+<!-- Relay settings modal (Firebase config) -->
+<div id="settings-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <h2>Réglages relais</h2>
+    <p class="modal-subtitle">
+      Colle ici la config Firebase de ton projet (Firebase console → Paramètres du
+      projet → Général → Tes applications → SDK). Optionnel : sans ça, l'appli reste
+      100&nbsp;% utilisable en local.
+    </p>
+    <textarea id="settings-config-input" class="settings-textarea" rows="8"
+      placeholder='{"apiKey": "...", "databaseURL": "https://xxx.firebaseio.com", "projectId": "..."}'></textarea>
+    <p id="settings-error" class="settings-error hidden"></p>
+    <div class="confirm-actions">
+      <button id="settings-clear-btn" type="button" class="btn btn-danger-outline">Effacer</button>
+      <button id="settings-save-btn" type="button" class="btn btn-primary">Enregistrer</button>
+    </div>
+    <button id="settings-close-btn" type="button" class="btn btn-outline modal-close">Fermer</button>
+  </div>
+</div>
+
+<!-- Fullscreen RENTRE signal (§8 / §16.8) -->
+<div id="rentre-overlay" class="rentre-overlay hidden">
+  <div class="rentre-overlay-content">
+    <span class="rentre-overlay-title">RENTRE AU STAND</span>
+    <button id="rentre-overlay-ok" type="button" class="btn btn-primary">OK, vu</button>
   </div>
 </div>
 

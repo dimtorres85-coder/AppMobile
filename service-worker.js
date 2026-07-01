@@ -1,6 +1,6 @@
 // Offline cache for the trackside PWA app shell.
 // Bump CACHE_VERSION whenever any precached file changes.
-const CACHE_VERSION = 'trackside-v1';
+const CACHE_VERSION = 'trackside-v2';
 const PRECACHE_URLS = [
   './',
   './index.html',
@@ -8,6 +8,8 @@ const PRECACHE_URLS = [
   './css/style.css',
   './js/now.js',
   './js/storage.js',
+  './js/transport.js',
+  './js/signals.js',
   './js/app.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
