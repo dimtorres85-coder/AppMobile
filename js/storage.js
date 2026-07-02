@@ -31,11 +31,6 @@ export function createDefaultState() {
     relais_estime_courant: 1,
     last_lap_ts: null,
     laps: [],
-    // True right after a pilot change driven by the PC (or a manual local
-    // correction): the last recorded lap belonged to whoever was current
-    // before, so showing it as "Dernier tour" would be misleading. Cleared
-    // as soon as a new lap is actually recorded.
-    last_lap_display_hidden: false,
 
     // Send queue bookkeeping (§16.6) — which laps got a confirmed write.
     synced_lap_ids: [],
@@ -52,6 +47,11 @@ export function createDefaultState() {
     pause: false,
     rentre: null,
     pc_pit_actif: false,
+    // Identifies the PC's current race attempt (null = none). Any change
+    // once we've already seen a value means the PC stopped, reset, or
+    // started a new race — the phone's own recording is wiped to match,
+    // since the PC is the source of truth for "is a race happening".
+    pc_race_started_at: null,
   };
 }
 

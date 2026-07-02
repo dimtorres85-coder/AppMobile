@@ -44,7 +44,7 @@ const el = {
   tourBtnLabel: document.getElementById('tour-btn-label'),
   tourPausedTag: document.getElementById('tour-paused-tag'),
   tourBtnHint: document.getElementById('tour-btn-hint'),
-  lastLapValue: document.getElementById('last-lap-value'),
+  toursRestantsValue: document.getElementById('tours-restants-value'),
   currentLapValue: document.getElementById('current-lap-value'),
   recordingToggleBtn: document.getElementById('recording-toggle-btn'),
   undoBtn: document.getElementById('undo-btn'),
@@ -191,7 +191,6 @@ function recordLap() {
 
   state.laps.push(lap);
   state.last_lap_ts = t;
-  state.last_lap_display_hidden = false;
   persist();
   render();
   flushLapQueue();
@@ -278,9 +277,6 @@ function selectPilote(id) {
   // New pilot, new stint: the running "chrono en cours" and the next lap
   // must start clean, not inherit elapsed time from the previous pilot.
   if (state.recording_active) state.last_lap_ts = now();
-  // The last recorded lap belonged to whoever was current before — showing
-  // it as "Dernier tour" for the newly-selected pilot would be misleading.
-  state.last_lap_display_hidden = true;
   persist();
   render();
   showToast('Pilote : ' + (currentPilote()?.nom || ''));
@@ -539,9 +535,6 @@ function syncPiloteWithPc(nom) {
   if (!pilote || pilote.id === state.pilote_courant_id) return false;
   state.pilote_courant_id = pilote.id;
   state.relais_estime_courant += 1;
-  // Same reasoning as selectPilote(): the last lap on screen belonged to
-  // the outgoing pilot, not this one.
-  state.last_lap_display_hidden = true;
   return true;
 }
 
@@ -565,8 +558,32 @@ function syncPiloteFromPc() {
   showToast('Pilote synchronisé : ' + state.pc_pilote_courant);
 }
 
+// The PC is authoritative: if it stopped, reset, or started a new race,
+// the phone's own recording no longer corresponds to anything and must be
+// wiped — laps, alarms, and the running chrono. Pilots list and pairing
+// are kept (that's not "chronos", it's just who's available to pick).
+function resetLocalRecordingFromPc() {
+  state.laps = [];
+  state.synced_lap_ids = [];
+  state.alarms = [];
+  state.session_start_ts = null;
+  state.recording_active = false;
+  state.last_lap_ts = null;
+  state.relais_estime_courant = 1;
+  state.pilote_courant_id = null;
+  histSelRelais = null;
+  histFollowCurrent = true;
+  showToast('↺ Course réinitialisée sur le PC — chronos et historique remis à zéro.');
+}
+
 function onPcState(raw) {
   if (!raw) return; // nothing published yet — keep current fallback UI
+  const pcRaceStartedAt = typeof raw.race_started_at === 'number' ? raw.race_started_at : null;
+  if (state.pc_state_recv_ts !== null && pcRaceStartedAt !== state.pc_race_started_at) {
+    resetLocalRecordingFromPc();
+  }
+  state.pc_race_started_at = pcRaceStartedAt;
+
   if (Array.isArray(raw.roster)) {
     mergePcRoster(raw.roster);
     state.pc_roster = raw.roster;
@@ -712,11 +729,13 @@ function retryUnackedAlarms() {
 // ---- Rendering ----
 
 function render() {
-  const sessionTime = state.session_start_ts === null
-    ? '0:00'
-    : formatDuration(now() - state.session_start_ts);
-  el.timerSession.textContent = sessionTime;
-  el.chronoSessionTime.textContent = sessionTime;
+  // What matters trackside isn't how long the phone has been open — it's
+  // how much of the endurance race is left, as computed by the PC.
+  const courseTimeLeft = (state.course_snapshot && typeof state.course_snapshot.fin_ts === 'number')
+    ? formatDuration(Math.max(0, state.course_snapshot.fin_ts - now()))
+    : '—';
+  el.timerSession.textContent = courseTimeLeft;
+  el.chronoSessionTime.textContent = courseTimeLeft;
 
   const pilote = currentPilote();
   el.pilotActuel.textContent = pilote ? pilote.nom : 'Aucun pilote sélectionné';
@@ -755,10 +774,10 @@ function render() {
   el.undoBtn.disabled = state.laps.length === 0;
   el.lapsCount.textContent = state.laps.length;
 
-  const lastLap = state.laps[state.laps.length - 1];
-  el.lastLapValue.textContent = (lastLap && !state.last_lap_display_hidden)
-    ? formatDuration(lastLap.valeur_chrono, { tenths: true })
-    : '—';
+  const toursRestants = state.relais_snapshot && typeof state.relais_snapshot.tours_restants === 'number'
+    ? state.relais_snapshot.tours_restants
+    : null;
+  el.toursRestantsValue.textContent = toursRestants !== null ? `≈ ${toursRestants}` : '—';
 
   renderLapsList();
   renderPending();
