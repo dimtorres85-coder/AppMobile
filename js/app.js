@@ -109,12 +109,14 @@ const el = {
   relaisLabel: document.getElementById('relais-label'),
   relaisCountdown: document.getElementById('relais-countdown'),
   relaisRentreTag: document.getElementById('relais-rentre-tag'),
-  courseCountdownLine: document.getElementById('course-countdown-line'),
-  courseCountdown: document.getElementById('course-countdown'),
 
   rentreBanner: document.getElementById('rentre-banner'),
   rentreOverlay: document.getElementById('rentre-overlay'),
   rentreOverlayOk: document.getElementById('rentre-overlay-ok'),
+
+  appFrame: document.getElementById('app-frame'),
+  navPosLeftBtn: document.getElementById('nav-pos-left-btn'),
+  navPosRightBtn: document.getElementById('nav-pos-right-btn'),
 };
 
 function persist() {
@@ -789,7 +791,11 @@ function render() {
   renderDivergence();
   renderAlarmStatus();
   renderHistorique();
-  el.navAlertDot.classList.toggle('hidden', !(state.rentre && state.rentre.actif));
+  el.navAlertDot.classList.toggle('hidden', !isRentreActive());
+
+  el.appFrame.classList.toggle('nav-right', state.nav_position === 'right');
+  el.navPosLeftBtn.classList.toggle('current', state.nav_position !== 'right');
+  el.navPosRightBtn.classList.toggle('current', state.nav_position === 'right');
 }
 
 function renderPending() {
@@ -998,14 +1004,13 @@ function renderRelais() {
     el.relaisLabel.textContent = 'Fin de relais';
     el.relaisCountdown.textContent = '--:--';
     el.relaisRentreTag.classList.add('hidden');
-    el.courseCountdownLine.classList.add('hidden');
     return;
   }
   const remainingMs = state.pause
     ? snap.cible_fin_ts - (state.pc_state_recv_ts ?? now())
     : snap.cible_fin_ts - now();
   const approx = snap.mode_alerte === 'tours';
-  const active = !!(state.rentre && state.rentre.actif);
+  const active = isRentreActive();
   // Past the target: don't freeze at 0 — keep counting up so it's obvious
   // (and by how much) the rider is overdue.
   const overtime = remainingMs < 0;
@@ -1032,13 +1037,6 @@ function renderRelais() {
       : `≈ ${formatDuration(remainingMs)}`;
   } else {
     el.relaisCountdown.textContent = formatDuration(remainingMs);
-  }
-
-  if (state.course_snapshot && state.course_snapshot.fin_ts) {
-    el.courseCountdownLine.classList.remove('hidden');
-    el.courseCountdown.textContent = formatDuration(Math.max(0, state.course_snapshot.fin_ts - now()));
-  } else {
-    el.courseCountdownLine.classList.add('hidden');
   }
 }
 
@@ -1071,12 +1069,20 @@ function renderAlarmStatus() {
   }
 }
 
-function maybeSignalRentre() {
+// True once the PC has an active "faire rentrer le pilote" signal AND the
+// user hasn't already acked this specific instance of it (by ts). Acking
+// resolves it everywhere immediately, without waiting on the PC round-trip.
+function isRentreActive() {
   const r = state.rentre;
-  if (!r || !r.actif) {
+  return !!(r && r.actif && r.ts !== state.rentre_acked_ts);
+}
+
+function maybeSignalRentre() {
+  if (!isRentreActive()) {
     el.rentreBanner.classList.add('hidden');
     return;
   }
+  const r = state.rentre;
   el.rentreBanner.classList.remove('hidden');
   if (r.ts !== lastFlashedRentreTs) {
     lastFlashedRentreTs = r.ts;
@@ -1084,6 +1090,16 @@ function maybeSignalRentre() {
     beep({ frequency: 660, times: 3 });
     vibrate([200, 100, 200, 100, 400]);
   }
+}
+
+function ackRentre() {
+  const r = state.rentre;
+  if (!r || !r.actif) return;
+  state.rentre_acked_ts = r.ts;
+  persist();
+  el.rentreOverlay.classList.add('hidden');
+  maybeSignalRentre(); // hides the banner immediately, doesn't wait on the PC
+  if (state.id_course) transport.pushRentreAck(state.id_course, r.ts).catch(() => {});
 }
 
 // ---- Confirm modal ----
@@ -1172,6 +1188,17 @@ for (const btn of el.navRail.querySelectorAll('.nav-item')) {
   btn.addEventListener('click', () => goToPage(btn.dataset.page));
 }
 
+el.navPosLeftBtn.addEventListener('click', () => {
+  state.nav_position = 'left';
+  persist();
+  render();
+});
+el.navPosRightBtn.addEventListener('click', () => {
+  state.nav_position = 'right';
+  persist();
+  render();
+});
+
 el.tourBtn.addEventListener('click', handleTourPress);
 el.undoBtn.addEventListener('click', undoLastLap);
 el.recordingToggleBtn.addEventListener('click', pauseRecording);
@@ -1223,7 +1250,7 @@ el.alarmBtn.addEventListener('pointerdown', startAlarmHold);
   el.alarmBtn.addEventListener(evt, cancelAlarmHold)
 );
 
-el.rentreOverlayOk.addEventListener('click', () => el.rentreOverlay.classList.add('hidden'));
+el.rentreOverlayOk.addEventListener('click', ackRentre);
 el.rentreBanner.addEventListener('click', () => el.rentreOverlay.classList.remove('hidden'));
 
 document.addEventListener('keydown', (e) => {

@@ -134,6 +134,15 @@ export async function pushAlarm(idCourse, alarm) {
   await firebaseModules.set(firebaseModules.ref(db, `sessions/${idCourse}/alarms/${alarm.id_unique}`), alarm);
 }
 
+// Acks the PC's "rentre" (come back to pits) signal so it clears on both
+// sides instead of staying active until the next stint starts.
+export async function pushRentreAck(idCourse, ts) {
+  if (!idCourse) throw new Error('Pas de course appairée.');
+  const db = await ensureConnected();
+  if (!db) throw new Error('Relais indisponible.');
+  await firebaseModules.set(firebaseModules.ref(db, `sessions/${idCourse}/rentre_ack`), { ts });
+}
+
 // Returns an unsubscribe function. Silently no-ops if unconfigured.
 export function listenAlarmAck(idCourse, idUnique, cb) {
   let liveUnsub = null;

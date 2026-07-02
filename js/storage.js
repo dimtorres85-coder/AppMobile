@@ -52,6 +52,12 @@ export function createDefaultState() {
     // started a new race — the phone's own recording is wiped to match,
     // since the PC is the source of truth for "is a race happening".
     pc_race_started_at: null,
+    // Locally acknowledged "rentre" alert timestamp — hides the alert as
+    // soon as the user taps OK without waiting for the PC round-trip.
+    rentre_acked_ts: null,
+
+    // Display preference (device-local, not synced).
+    nav_position: 'left',
   };
 }
 

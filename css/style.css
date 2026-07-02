@@ -86,6 +86,9 @@ button, input, textarea { font-family: inherit; }
   position: relative;
   overflow: hidden;
 }
+/* Nav rail position setting (Accueil): mirrors the whole frame instead of
+   reordering DOM, so nothing else needs to know which side it's on. */
+.app-frame.nav-right { flex-direction: row-reverse; }
 
 .nav-rail {
   flex: none;
@@ -98,6 +101,7 @@ button, input, textarea { font-family: inherit; }
   background: #100e08;
   border-right: 1px solid var(--border-1);
 }
+.app-frame.nav-right .nav-rail { border-right: none; border-left: 1px solid var(--border-1); }
 .nav-rail__logo {
   display: flex;
   align-items: center;
@@ -138,6 +142,7 @@ button, input, textarea { font-family: inherit; }
   border-radius: 3px;
   background: transparent;
 }
+.app-frame.nav-right .nav-item__bar { left: auto; right: -9px; }
 .nav-item__icon { font-size: 24px; line-height: 1; }
 .nav-item__label {
   font-family: 'JetBrains Mono', monospace;
@@ -400,6 +405,20 @@ textarea.field { resize: none; }
 .settings-actions { display: flex; gap: 9px; margin-top: 12px; }
 .settings-actions .btn-danger-outline { flex: none; padding: 13px 16px; }
 .settings-actions .btn-gold { flex: 1; }
+
+.nav-position-toggle { display: flex; gap: 9px; }
+.nav-position-btn {
+  flex: 1;
+  padding: 13px;
+  background: var(--card-strong);
+  border: 1px solid var(--border-3);
+  border-radius: 12px;
+  color: var(--text-soft);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+.nav-position-btn.current { background: var(--amber-bg); border-color: var(--amber-border); color: var(--gold); }
 
 /* ===== Page: Chrono ===== */
 /* This whole page is a flex column so the laps list is the only part that

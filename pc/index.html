@@ -248,6 +248,7 @@ async function fbInit(force){ try{
   const base='sessions/'+SYNC.code;
   SYNC.db.ref(base+'/laps').on('child_added', s=>{ try{ onLapReceived(s.key, s.val()); }catch(e){} });
   SYNC.db.ref(base+'/alarms').on('child_added', s=>{ try{ onAlarmReceived(s.key, s.val()); }catch(e){} });
+  SYNC.db.ref(base+'/rentre_ack').on('value', s=>{ try{ onRentreAck(s.val()); }catch(e){} });
   fbDoPublish(); updateNetDot();
  }catch(e){ SYNC.ready=false; SYNC.connected=false; SYNC.err=(e&&e.message)?e.message:String(e); console.error('[sync] init échec',e); updateNetDot(); } }
 let pubT=null;
@@ -285,7 +286,7 @@ function onLapReceived(key,val){ if(!val) return; const id=val.id_unique||key; i
   const sec = typeof val.valeur_chrono==='number'? val.valeur_chrono : parseLap(String(val.valeur_chrono||''));
   state.inbox.push({ id, ts:val.timestamp||now(), val:sec, pilote:val.pilote_vu_tel||'', relEst:val.id_relais_estime });
   save(); if(state.phase==='laps') render(); toast('⬇ Chrono reçu du téléphone'); }
-function onAlarmReceived(key,val){ const id=(val&&val.id_unique)||key; if(state.seenAlarms[id]) return; state.seenAlarms[id]=true; save();
+function onAlarmReceived(key,val){ if(!val) return; const id=val.id_unique||key; if(state.seenAlarms[id]) return; state.seenAlarms[id]=true; save();
   try{ SYNC.db.ref('sessions/'+SYNC.code+'/alarms/'+id+'/ack').set({timestamp:Math.round(now())}); }catch(e){}
   const ts=(val&&val.timestamp)||now(); if(ts < SYNC.connectTs-5000) return;   // ne pas rejouer l'historique au (re)branchement
   state.alarmTel={ id, ts }; state.alertReturn=['live','laps','stats','settings','driver'].includes(state.phase)?state.phase:'live';
@@ -456,6 +457,27 @@ function beepFuel(){ beep(440,.18,'triangle',0); beep(440,.18,'triangle',.24); }
 // ───────────────────────── transitions / actions ─────────────────────────
 function go(phase){ state.phase = phase; save(); render(); }
 function resetRelaisAcks(){ state.ack.relais=false; state.ack.fuel=false; state.rentre={actif:false,relais_id:null,ts:null}; }
+
+// Bouton "Alerter le mobile" : déclenche le même signal que l'alerte
+// automatique de fin de relais, mais à la demande — sans passer par
+// state.ack.relais (qui ne concerne que le déclenchement automatique par
+// le minuteur) et sans monopoliser l'écran PC, contrairement à l'alerte
+// auto qui bascule l'opérateur sur alertR.
+function sendRentreManual(){
+  if(!curRelais()){ toast('Aucun relais en cours.'); return; }
+  state.rentre = { actif:true, relais_id: state.relais.length-1, ts: now() };
+  save(); render(); beepRelais();
+  toast('🚩 Alerte envoyée au mobile : faire rentrer le pilote');
+}
+// Acquittement envoyé par le mobile (bouton "OK, VU") : referme l'alerte
+// des deux côtés au lieu de la laisser active jusqu'au prochain relais.
+function onRentreAck(val){
+  if(!val || !state.rentre || !state.rentre.actif) return;
+  if(val.ts !== state.rentre.ts) return;   // acquittement d'une alerte déjà remplacée/effacée
+  state.rentre = { actif:false, relais_id:null, ts:null };
+  save(); render();
+  toast('✓ Alerte acquittée par le mobile');
+}
 
 function arm(){ readConfigInputs(); ensureCode(); if(state.cfg.autoArm) go('armed'); else launch(); }   // auto désactivé => départ manuel immédiat
 function launch(){
@@ -771,6 +793,7 @@ const SCREENS = {
       <div style="position:absolute; top:34px; right:46px; display:flex; align-items:center; gap:12px; color:var(--muted); font-size:40px; z-index:4;" class="mono">
         <span style="width:9px;height:9px;border-radius:50%;background:var(--muted);"></span><span id="v-clock"></span></div>
       <div id="netdot" title="Synchro mobile" style="position:absolute; left:44px; top:82px; z-index:4; background:#181510cc; border:1px solid var(--line); border-radius:999px; padding:7px 16px; font-size:22px; color:var(--muted); cursor:pointer;">○ —</div>
+      <button id="b-rentre-manual" title="Envoie au mobile le signal de faire rentrer le pilote, sans attendre l'alerte automatique de fin de relais" style="position:absolute; left:44px; top:134px; z-index:4; background:#2a1a08cc; border:1px solid #6a3a12; border-radius:999px; padding:8px 18px; font-size:20px; color:#ffb066; cursor:pointer; display:flex; align-items:center; gap:8px;">🚩 Alerter le mobile</button>
       ${body}
       <div class="tab" id="t-stats" style="top:300px;"><span style="font-size:38px;">📊</span><div><div style="font-weight:700;font-size:30px;">Stats</div><div class="mono muted" style="font-size:20px;">[S]</div></div></div>
       <div class="tab" id="t-settings" style="top:444px;"><span style="font-size:38px;">⚙️</span><div><div style="font-weight:700;font-size:30px;">Paramètres</div><div class="mono muted" style="font-size:20px;">[P]</div></div></div>
@@ -1243,6 +1266,7 @@ function wire(){
     on('b-driver','click',()=>{ state.driverReturn='live'; state.driverMode='correct'; go('driver'); });
     on('b-incident','click',enterIncident);
     on('netdot','click',openSettings);
+    on('b-rentre-manual','click',sendRentreManual);
     document.querySelectorAll('.vbtn').forEach(b=>b.addEventListener('click',()=>{ state.variant=b.dataset.v; save(); render(); }));
   }
   // stratégie partagée (incident + paramètres) : réordonner + activer/désactiver

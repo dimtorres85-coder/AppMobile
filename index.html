@@ -20,7 +20,7 @@
 <body>
 
 <div class="app-shell">
-<div class="app-frame">
+<div class="app-frame" id="app-frame">
 
 <nav class="nav-rail" id="nav-rail">
   <div class="nav-rail__logo"><span></span></div>
@@ -55,7 +55,7 @@
 <div class="content-col">
 
   <div id="rentre-banner" class="rentre-banner hidden">
-    <div class="rentre-banner__row"><span>🚩</span><span>RENTRE AU STAND</span></div>
+    <div class="rentre-banner__row"><span>🚩</span><span>FAIRE RENTRER LE PILOTE</span></div>
   </div>
 
   <div class="content-scroll">
@@ -107,6 +107,14 @@
       </div>
 
       <div class="card">
+        <div class="card-label" style="margin-bottom:10px">Bandeau de navigation</div>
+        <div class="nav-position-toggle">
+          <button id="nav-pos-left-btn" type="button" class="nav-position-btn">◧ Gauche</button>
+          <button id="nav-pos-right-btn" type="button" class="nav-position-btn">◨ Droite</button>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-label">Paramètres de connexion</div>
         <p class="card-desc">Colle la config technique fournie par le stand.</p>
         <textarea id="settings-config-input" class="field settings-textarea" placeholder='{ "databaseURL": "https://xxx.firebaseio.com", ... }'></textarea>
@@ -144,8 +152,7 @@
           <div id="relais-countdown" class="chrono-split__value">--:--</div>
         </div>
       </div>
-      <div id="relais-rentre-tag" class="relais-flag hidden">→ RENTRE MAINTENANT</div>
-      <div id="course-countdown-line" class="relais-sub hidden">Fin de course dans <span id="course-countdown">--:--</span></div>
+      <div id="relais-rentre-tag" class="relais-flag hidden">→ FAIRE RENTRER LE PILOTE</div>
 
       <div class="tour-wrap">
         <button id="tour-btn" type="button" class="tour-btn">
@@ -272,8 +279,8 @@
 <!-- Fullscreen RENTRE signal -->
 <div id="rentre-overlay" class="rentre-overlay hidden">
   <div class="rentre-overlay__flag">🚩</div>
-  <div class="rentre-overlay__title">RENTRE<br>AU STAND</div>
-  <div class="rentre-overlay__sub">Le stand te demande de rentrer</div>
+  <div class="rentre-overlay__title">FAIRE RENTRER<br>LE PILOTE</div>
+  <div class="rentre-overlay__sub">Fais signe au pilote de rentrer au stand.</div>
   <button id="rentre-overlay-ok" type="button" class="rentre-overlay__ok">OK, VU</button>
 </div>
 
