@@ -1,4 +1,49 @@
-:root {
+/* Mode JOUR (par défaut) : fond clair, texte très sombre — pensé pour
+   rester lisible en plein soleil, en bord de piste, écran à fond. Le mode
+   NUIT ci-dessous reprend l'ancienne palette sombre, pour le stand/la nuit. */
+:root, [data-theme="light"] {
+  --bg: #f7f4ec;
+  --card: #ffffff;
+  --card-alt: #fbf8f0;
+  --card-strong: #ffffff;
+  --card-deep: #efe9d8;
+  --field: #ffffff;
+
+  --border-1: #e6ddc4;
+  --border-2: #ddd2b0;
+  --border-3: #cabd94;
+  --border-4: #b3a373;
+  --border-5: #8f7f52;
+
+  --text: #1c1610;
+  --text-muted: #5f5540;
+  --text-dim: #83765a;
+  --text-dim2: #6b5f47;
+  --text-soft: #332c1c;
+
+  --gold: #a8790a;
+  --gold-ink: #16110a;
+  --amber: #b5590a;
+  --amber-bg: #fbe9cf;
+  --amber-border: #e0b573;
+
+  --orange: #d1540a;
+  --orange-ink: #fff8ef;
+
+  --red: #c81e28;
+  --red-2: #b3141d;
+  --red-3: #8f0f16;
+  --red-bg: #fde7e6;
+  --red-bg-2: #fbdadb;
+  --red-border: #eab3b3;
+  --red-overlay-ink: #7a1015;
+
+  --green: #1f8a3a;
+  --green-bg: #e3f5e6;
+  --green-border: #a9dcb4;
+}
+
+[data-theme="dark"] {
   --bg: #0c0b07;
   --card: #16130d;
   --card-alt: #13110b;
@@ -33,12 +78,20 @@
   --red-bg: #180b09;
   --red-bg-2: #1e0c0c;
   --red-border: #6f2b2e;
-  --red-flash: #6f1417;
   --red-overlay-ink: #c0272c;
 
   --green: #5fd06f;
   --green-bg: #0c1c0d;
   --green-border: #2f5a2c;
+}
+
+:root {
+  /* Couleurs de l'alerte plein écran RENTRE — volontairement fixes (pas de
+     variante jour/nuit) : c'est un signal d'urgence, il doit rester aussi
+     agressif dans les deux thèmes, avec le texte blanc toujours lisible
+     dessus tout au long du flash. */
+  --emergency-flash-a: #e5484d;
+  --emergency-flash-b: #6f1417;
 
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -61,7 +114,7 @@ html, body {
 button, input, textarea { font-family: inherit; }
 
 @keyframes bpPulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-@keyframes bpFlash { 0% { background: var(--red); } 50% { background: var(--red-flash); } }
+@keyframes bpFlash { 0% { background: var(--emergency-flash-a); } 50% { background: var(--emergency-flash-b); } }
 @keyframes bpRing {
   0% { box-shadow: 0 0 0 0 rgba(229,72,77,.5); }
   70% { box-shadow: 0 0 0 22px rgba(229,72,77,0); }
@@ -181,6 +234,7 @@ button, input, textarea { font-family: inherit; }
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--bg);
 }
 
 .rentre-banner {
@@ -720,7 +774,7 @@ textarea.field { resize: none; }
   position: relative;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  color: #c98a8c;
+  color: var(--red-3);
   text-align: center;
   max-width: 220px;
   line-height: 1.5;
@@ -956,11 +1010,13 @@ textarea.field { resize: none; }
   border: 2px solid rgba(245,197,24,.5);
   box-shadow: 0 0 0 100vmax rgba(5,4,3,.62);
 }
+/* Le viewfinder QR reste sombre dans les deux thèmes (contraste caméra) :
+   ses accents sont donc des couleurs fixes, pas les variables de thème. */
 .qr-modal__corner {
   position: absolute;
   width: 28px;
   height: 28px;
-  border-color: var(--gold);
+  border-color: #f5c518;
   border-style: solid;
   border-width: 0;
 }
@@ -973,7 +1029,7 @@ textarea.field { resize: none; }
   left: 8%;
   right: 8%;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  background: linear-gradient(90deg, transparent, #f5c518, transparent);
   animation: bpScan 2s ease-in-out infinite alternate;
 }
 .qr-modal__hint {
@@ -982,7 +1038,7 @@ textarea.field { resize: none; }
   text-align: center;
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  color: var(--text-soft);
+  color: #cfc7b6;
 }
 .qr-modal__actions { padding: 18px 18px calc(28px + var(--safe-bottom)); }
 .qr-modal__actions .btn { width: 100%; margin-bottom: 10px; padding: 15px; font-size: 15px; }
@@ -1049,7 +1105,7 @@ textarea.field { resize: none; }
   font-weight: 900;
   font-size: 44px;
   line-height: 1.02;
-  color: var(--gold);
+  color: #f5c518;
   text-shadow: 0 4px 30px rgba(245,197,24,.35);
 }
 .finish-overlay__sub {

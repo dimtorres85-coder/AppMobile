@@ -126,6 +126,8 @@ const el = {
   appFrame: document.getElementById('app-frame'),
   navPosLeftBtn: document.getElementById('nav-pos-left-btn'),
   navPosRightBtn: document.getElementById('nav-pos-right-btn'),
+  themeLightBtn: document.getElementById('theme-light-btn'),
+  themeDarkBtn: document.getElementById('theme-dark-btn'),
 
   soundRentre: document.getElementById('sound-rentre'),
   soundRentreTest: document.getElementById('sound-rentre-test'),
@@ -834,6 +836,10 @@ function render() {
   el.navPosLeftBtn.classList.toggle('current', state.nav_position !== 'right');
   el.navPosRightBtn.classList.toggle('current', state.nav_position === 'right');
 
+  document.documentElement.setAttribute('data-theme', state.theme === 'dark' ? 'dark' : 'light');
+  el.themeLightBtn.classList.toggle('current', state.theme !== 'dark');
+  el.themeDarkBtn.classList.toggle('current', state.theme === 'dark');
+
   el.soundRentre.value = state.sound_prefs.rentre;
   el.soundFinish.value = state.sound_prefs.finish;
   el.soundAlarmAck.value = state.sound_prefs.alarm_ack;
@@ -1273,6 +1279,17 @@ el.navPosLeftBtn.addEventListener('click', () => {
 });
 el.navPosRightBtn.addEventListener('click', () => {
   state.nav_position = 'right';
+  persist();
+  render();
+});
+
+el.themeLightBtn.addEventListener('click', () => {
+  state.theme = 'light';
+  persist();
+  render();
+});
+el.themeDarkBtn.addEventListener('click', () => {
+  state.theme = 'dark';
   persist();
   render();
 });

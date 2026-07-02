@@ -59,6 +59,8 @@ export function createDefaultState() {
 
     // Display preference (device-local, not synced).
     nav_position: 'left',
+    // 'light' (par défaut, lisible en plein soleil) ou 'dark' (stand/nuit).
+    theme: 'light',
     // Sound preset per alert type (device-local, not synced — each phone
     // picks whatever cuts through its own trackside noise best).
     sound_prefs: { rentre: 'strident', finish: 'doux', alarm_ack: 'simple' },
