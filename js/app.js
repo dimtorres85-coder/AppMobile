@@ -8,6 +8,9 @@ let currentPage = 'accueil';
 let confirmCallback = null;
 let pairingEditMode = false;
 let lastFlashedRentreTs = null;
+let alarmStatusAutoHideTimer = null;
+let alarmStatusScheduledForId = null;
+let alarmStatusDismissedForId = null;
 let stateUnsubscribe = null;
 let activeMobileUnsubscribe = null;
 let flushingLaps = false;
@@ -308,6 +311,9 @@ function resetSession() {
   alarmAckUnsubscribes.forEach((unsub) => unsub());
   alarmAckUnsubscribes.clear();
   lastFlashedRentreTs = null;
+  clearTimeout(alarmStatusAutoHideTimer);
+  alarmStatusScheduledForId = null;
+  alarmStatusDismissedForId = null;
   pairingEditMode = false;
 
   const keepPilotes = state.pilotes;
@@ -575,6 +581,9 @@ function resetLocalRecordingFromPc() {
   state.pilote_courant_id = null;
   histSelRelais = null;
   histFollowCurrent = true;
+  clearTimeout(alarmStatusAutoHideTimer);
+  alarmStatusScheduledForId = null;
+  alarmStatusDismissedForId = null;
   showToast('↺ Course réinitialisée sur le PC — chronos et historique remis à zéro.');
 }
 
@@ -1052,7 +1061,7 @@ function renderDivergence() {
 
 function renderAlarmStatus() {
   const last = state.alarms[state.alarms.length - 1];
-  if (!last) {
+  if (!last || alarmStatusDismissedForId === last.id_unique) {
     el.alarmStatus.classList.add('hidden');
     return;
   }
@@ -1060,6 +1069,16 @@ function renderAlarmStatus() {
   if (last.acked) {
     el.alarmStatus.innerHTML = '<span>✓</span><span>PC prévenu</span>';
     el.alarmStatus.classList.add('acked');
+    // Resets back to idle a few seconds after the PC acks, instead of
+    // leaving "PC prévenu" on screen indefinitely.
+    if (alarmStatusScheduledForId !== last.id_unique) {
+      alarmStatusScheduledForId = last.id_unique;
+      clearTimeout(alarmStatusAutoHideTimer);
+      alarmStatusAutoHideTimer = setTimeout(() => {
+        alarmStatusDismissedForId = last.id_unique;
+        render();
+      }, 4000);
+    }
   } else if (!state.id_course || !transport.isConfigured() || !transport.isConnected()) {
     el.alarmStatus.innerHTML = '<span>⚠</span><span>Non remis (réseau)</span>';
     el.alarmStatus.classList.add('unsent');

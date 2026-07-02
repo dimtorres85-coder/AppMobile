@@ -792,8 +792,14 @@ const SCREENS = {
       <div id="fuelbar" style="display:none;">⛽ Alerte plein — pense à refaire le plein au prochain arrêt</div>
       <div style="position:absolute; top:34px; right:46px; display:flex; align-items:center; gap:12px; color:var(--muted); font-size:40px; z-index:4;" class="mono">
         <span style="width:9px;height:9px;border-radius:50%;background:var(--muted);"></span><span id="v-clock"></span></div>
+      <button id="b-rentre-manual" title="Envoie au mobile le signal de faire rentrer le pilote, sans attendre l'alerte automatique de fin de relais"
+        style="position:absolute; top:96px; right:46px; z-index:4; height:104px; min-width:360px; padding:0 30px; border-radius:20px;
+        background:linear-gradient(180deg,#ff7a3c 0%,#ff4d12 55%,#d43600 100%); border:2px solid #ffb066;
+        box-shadow:0 12px 34px -10px rgba(255,80,10,.7), inset 0 2px 2px rgba(255,255,255,.35);
+        color:#fff; font-weight:900; font-size:32px; letter-spacing:.5px; cursor:pointer;
+        display:flex; align-items:center; justify-content:center; gap:16px;">🚩 FAIRE RENTRER LE PILOTE</button>
       <div id="netdot" title="Synchro mobile" style="position:absolute; left:44px; top:82px; z-index:4; background:#181510cc; border:1px solid var(--line); border-radius:999px; padding:7px 16px; font-size:22px; color:var(--muted); cursor:pointer;">○ —</div>
-      <button id="b-rentre-manual" title="Envoie au mobile le signal de faire rentrer le pilote, sans attendre l'alerte automatique de fin de relais" style="position:absolute; left:44px; top:134px; z-index:4; background:#2a1a08cc; border:1px solid #6a3a12; border-radius:999px; padding:8px 18px; font-size:20px; color:#ffb066; cursor:pointer; display:flex; align-items:center; gap:8px;">🚩 Alerter le mobile</button>
+      ${state.sessionCode?`<div style="position:absolute; left:44px; top:130px; z-index:4; background:#181510cc; border:1px solid var(--line); border-radius:14px; padding:10px;">${qrSVG(state.sessionCode,110)}</div>`:''}
       ${body}
       <div class="tab" id="t-stats" style="top:300px;"><span style="font-size:38px;">📊</span><div><div style="font-weight:700;font-size:30px;">Stats</div><div class="mono muted" style="font-size:20px;">[S]</div></div></div>
       <div class="tab" id="t-settings" style="top:444px;"><span style="font-size:38px;">⚙️</span><div><div style="font-weight:700;font-size:30px;">Paramètres</div><div class="mono muted" style="font-size:20px;">[P]</div></div></div>
