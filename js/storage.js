@@ -47,6 +47,7 @@ export function createDefaultState() {
     pause: false,
     rentre: null,
     pc_pit_actif: false,
+    pc_race_over: false,
     // Identifies the PC's current race attempt (null = none). Any change
     // once we've already seen a value means the PC stopped, reset, or
     // started a new race — the phone's own recording is wiped to match,

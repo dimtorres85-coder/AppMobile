@@ -8,6 +8,8 @@ let currentPage = 'accueil';
 let confirmCallback = null;
 let pairingEditMode = false;
 let lastFlashedRentreTs = null;
+let raceOverSignaled = false;
+let raceOverDismissed = false;
 let alarmStatusAutoHideTimer = null;
 let alarmStatusScheduledForId = null;
 let alarmStatusDismissedForId = null;
@@ -117,6 +119,9 @@ const el = {
   rentreBanner: document.getElementById('rentre-banner'),
   rentreOverlay: document.getElementById('rentre-overlay'),
   rentreOverlayOk: document.getElementById('rentre-overlay-ok'),
+
+  finishOverlay: document.getElementById('finish-overlay'),
+  finishOverlayOk: document.getElementById('finish-overlay-ok'),
 
   appFrame: document.getElementById('app-frame'),
   navPosLeftBtn: document.getElementById('nav-pos-left-btn'),
@@ -319,6 +324,8 @@ function resetSession() {
   clearTimeout(alarmStatusAutoHideTimer);
   alarmStatusScheduledForId = null;
   alarmStatusDismissedForId = null;
+  raceOverSignaled = false;
+  raceOverDismissed = false;
   pairingEditMode = false;
 
   const keepPilotes = state.pilotes;
@@ -589,6 +596,8 @@ function resetLocalRecordingFromPc() {
   clearTimeout(alarmStatusAutoHideTimer);
   alarmStatusScheduledForId = null;
   alarmStatusDismissedForId = null;
+  raceOverSignaled = false;
+  raceOverDismissed = false;
   showToast('↺ Course réinitialisée sur le PC — chronos et historique remis à zéro.');
 }
 
@@ -624,11 +633,13 @@ function onPcState(raw) {
     showToast('⏸ Pit signalé par le PC — chrono en pause.');
   }
   state.pc_pit_actif = pitActif;
+  state.pc_race_over = !!raw.race_over;
 
   state.pc_state_recv_ts = now();
   persist();
   render();
   maybeSignalRentre();
+  maybeSignalRaceOver();
 }
 
 // ---- Lap send queue (§16.6) — idempotent by id_unique, USB/relay coexist ----
@@ -1133,6 +1144,33 @@ function ackRentre() {
   if (state.id_course) transport.pushRentreAck(state.id_course, r.ts).catch(() => {});
 }
 
+// Mirrors the PC's "finish" screen (course terminée). No ack round-trip to
+// the PC needed here — it's purely informational, dismissed locally, and
+// re-armed whenever resetLocalRecordingFromPc() detects a new race attempt.
+function isRaceOverActive() {
+  return !!state.pc_race_over && !raceOverDismissed;
+}
+
+function maybeSignalRaceOver() {
+  if (!isRaceOverActive()) {
+    el.finishOverlay.classList.add('hidden');
+    return;
+  }
+  el.finishOverlay.classList.remove('hidden');
+  if (!raceOverSignaled) {
+    raceOverSignaled = true;
+    beep({ frequency: 660, duration: 150, times: 1 });
+    setTimeout(() => beep({ frequency: 880, duration: 150, times: 1 }), 180);
+    setTimeout(() => beep({ frequency: 1100, duration: 300, times: 1 }), 360);
+    vibrate([150, 80, 150, 80, 300]);
+  }
+}
+
+function ackRaceOver() {
+  raceOverDismissed = true;
+  el.finishOverlay.classList.add('hidden');
+}
+
 // ---- Confirm modal ----
 
 function openConfirm(title, message, onConfirm) {
@@ -1282,6 +1320,7 @@ el.alarmBtn.addEventListener('pointerdown', startAlarmHold);
 );
 
 el.rentreOverlayOk.addEventListener('click', ackRentre);
+el.finishOverlayOk.addEventListener('click', ackRaceOver);
 el.rentreBanner.addEventListener('click', () => el.rentreOverlay.classList.remove('hidden'));
 
 document.addEventListener('keydown', (e) => {

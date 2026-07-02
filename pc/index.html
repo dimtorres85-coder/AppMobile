@@ -293,7 +293,7 @@ function fbBuildState(){ const cur=curRelais(); const t=now();
   // et remettre à zéro ses propres chronos — le PC reste maître.
   return { pilote_courant:pilote, roster, relais, course: fin!=null?{fin_ts:fin}:null,
     pause: !!state.pause.active, rentre: state.rentre||{actif:false,relais_id:null,ts:null}, pit_actif:pitActif,
-    race_started_at: state.race.startedAt!=null?Math.round(state.race.startedAt):null, maj_ts:Math.round(t) }; }
+    race_started_at: state.race.startedAt!=null?Math.round(state.race.startedAt):null, race_over:!!state.raceOver, maj_ts:Math.round(t) }; }
 function onLapReceived(key,val){ if(!val) return; const id=val.id_unique||key; if(state.seenLaps[id]) return; state.seenLaps[id]=true;
   const sec = typeof val.valeur_chrono==='number'? val.valeur_chrono : parseLap(String(val.valeur_chrono||''));
   state.inbox.push({ id, ts:val.timestamp||now(), val:sec, pilote:val.pilote_vu_tel||'', relEst:val.id_relais_estime });
