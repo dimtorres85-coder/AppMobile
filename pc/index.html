@@ -620,6 +620,7 @@ function tick(){
     if(state.cfg.alerts.fuel && !state.ack.fuel && fuelRem()<=FUEL_WARN){ state.ack.fuel=true; beepFuel(); save(); }
   }
   if(state.phase==='live') updateLive();
+  if(state.phase==='laps') updateLapsProgress();
   if(state.phase==='pit' && state.pit.active) setText('v-pit', fmt((t-state.pit.startedAt)/1000));
   if(state.phase==='incident' && state.incident){ setText('v-incident', fmt((t-state.incident.startedAt)/1000));
     setText('v-inc-course', fmtH(courseRem())); setText('v-inc-relais', fmt(relaisRem()));
@@ -632,11 +633,33 @@ function pcClockStr(){ const d=new Date(); return pad(d.getHours())+':'+pad(d.ge
 function setText(id,val){ const el=document.getElementById(id); if(el) el.textContent=val; }
 function updateLive(){
   const cur=curRelais(); if(!cur)return;
-  const rRem=relaisRem(), max=drivers()[cur.driverIdx].max, col=relaisColor(rRem/max);
-  setText('v-course', fmtH(courseRem())); setText('v-relais', fmt(rRem)); setText('v-elapsed', fmt(relaisElapsed()));
-  const rel=$('#v-relais'); if(rel){ rel.style.color=col; rel.style.textShadow='0 0 70px '+col.replace('hsl','hsla').replace(')',' / .45)'); }
+  const rRem=relaisRem(), max=drivers()[cur.driverIdx].max;
+  const overtime = rRem<0;
+  const col = overtime ? '#ff3b3b' : relaisColor(rRem/max);
+  setText('v-course', fmtH(courseRem()));
+  // Past the target, don't freeze at 0:00 (fmt() clamps) — keep counting up
+  // so it's obvious the rider is overdue, and by how much.
+  setText('v-relais', overtime ? '+'+fmt(-rRem) : fmt(rRem));
+  setText('v-elapsed', fmt(relaisElapsed()));
+  const rel=$('#v-relais');
+  if(rel){
+    rel.style.color=col;
+    rel.style.textShadow='0 0 70px '+col.replace('hsl','hsla').replace(')',' / .45)');
+    rel.style.animation = overtime ? 'enduPulse .9s ease-in-out infinite' : '';
+  }
   const p=driverPace(cur.driverIdx); setText('v-tours', p? '~'+Math.max(0,Math.floor(rRem/p)) : '—');
   const fb=$('#fuelbar'); if(fb) fb.style.display = (state.cfg.alerts.fuel && state.ack.fuel && fuelRem()<=FUEL_WARN) ? 'flex':'none';
+}
+// Fills the current relay's tab like a loading bar as the stint progresses,
+// so the team manager stays aware of time spent on the chronos page without
+// needing the live screen. Same color scale as v-relais for consistency.
+function updateLapsProgress(){
+  const cur=curRelais(); if(!cur) return;
+  const bar=$('#segbtn-progress'); if(!bar) return;
+  const max=drivers()[cur.driverIdx].max;
+  const frac = max>0 ? Math.max(0, Math.min(1, relaisElapsed()/max)) : 0;
+  bar.style.width=(frac*100).toFixed(1)+'%';
+  bar.style.background = relaisColor(1-frac).replace('hsl','hsla').replace(')',' / .3)');
 }
 
 // ───────────────────────── rendu ─────────────────────────
@@ -920,15 +943,16 @@ const SCREENS = {
       <div class="muted" style="font-size:22px;text-transform:uppercase;letter-spacing:2px;">Un segment par relais — clique pour saisir</div>
       <div style="display:flex; gap:8px; height:118px;">
         ${segs.map((s,i)=>{ const cur=i===segs.length-1, on=i===state.selSeg;
-          return `<div class="segbtn" data-i="${i}" style="flex:${cur?1.5:1};border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+          return `<div class="segbtn" data-i="${i}" style="flex:${cur?1.5:1};border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;position:relative;overflow:hidden;
             border:2px solid ${on?'var(--accent)':(cur?'#4a3a18':'var(--line)')};background:${on?'#2a2110':(cur?'#1f1a10':'var(--panel)')};color:${on?'var(--accent)':(cur?'#e6c98a':'#cfc7b6')};">
-            <span class="mono" style="font-weight:800;font-size:30px;">R${i+1}${s.incident?' ⚠':''}</span>
-            <span style="font-size:22px;font-weight:600;">${esc(drivers()[s.driverIdx].name)}</span>
-            <span style="font-size:18px;opacity:.7;">${cur?'en cours · ':''}${s.laps.length} t</span></div>`;
+            ${cur?`<span id="segbtn-progress" style="position:absolute;left:0;top:0;bottom:0;width:0%;background:rgba(245,166,35,.25);z-index:0;transition:width .5s linear;"></span>`:''}
+            <span class="mono" style="font-weight:800;font-size:30px;position:relative;z-index:1;">R${i+1}${s.incident?' ⚠':''}</span>
+            <span style="font-size:22px;font-weight:600;position:relative;z-index:1;">${esc(drivers()[s.driverIdx].name)}</span>
+            <span style="font-size:18px;opacity:.7;position:relative;z-index:1;">${cur?'en cours · ':''}${s.laps.length} t</span></div>`;
         }).join('') || '<div class="muted" style="font-size:26px;">Aucun relais encore — la course n\'a pas démarré.</div>'}</div>
       ${(state.inbox&&state.inbox.length)?`<div class="panel" style="padding:16px 22px; display:flex; flex-direction:column; gap:8px; border-color:#3a5a2a;">
         <div class="muted" style="font-size:20px; text-transform:uppercase; letter-spacing:2px;">⬇ Chronos reçus du téléphone (${state.inbox.length}) — placer dans le relais sélectionné (nº ${state.selSeg+1})</div>
-        <div style="display:flex; flex-direction:column; gap:8px; max-height:160px; overflow:auto;">
+        <div style="display:flex; flex-direction:column; gap:8px; max-height:220px; overflow:auto;">
         ${state.inbox.map((it,i)=>{ const selDrv=state.relais[state.selSeg]?drivers()[state.relais[state.selSeg].driverIdx].name:''; const mism=it.pilote&&selDrv&&it.pilote!==selDrv;
           return `<div style="display:flex; align-items:center; gap:14px; padding:8px 12px; border-radius:10px; background:var(--head);">
             <span class="mono" style="font-size:28px; font-weight:700; color:var(--green); width:120px;">${it.val!=null?fmtLapTrim(it.val):'?'}</span>
@@ -946,9 +970,11 @@ const SCREENS = {
           <div style="display:flex; gap:14px;"><input class="field" id="l-input" placeholder="1:44.2" style="flex:1;">
             <button class="btn-primary" id="l-add" style="width:170px;border-radius:14px;font-size:28px;">Ajouter</button></div>
           <div class="muted" style="font-size:22px;">Format m:ss.d ou secondes. Entrée pour valider. Alimente l'allure du pilote.</div>
-          ${sel.laps.length?`<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:2px;">
-            <span class="muted" style="font-size:20px;">Suggestions (dernier ${fmtLapTrim(sel.laps[sel.laps.length-1])}) :</span>
-            ${[-2,-1,0,1,2].map(o=>{ const v=Math.max(0,sel.laps[sel.laps.length-1]+o); return `<button class="lap-sugg" data-v="${fmtLapTrim(v)}" style="height:54px; padding:0 16px; border-radius:12px; border:1px solid ${o===0?'var(--accent)':'#322d22'}; background:${o===0?'#2a2110':'#1a1610'}; color:${o===0?'var(--accent)':'#cfc7b6'}; font-family:var(--mono); font-weight:700; font-size:24px;">${fmtLapTrim(v)}</button>`; }).join('')}
+          ${sel.laps.length?`<div style="margin-top:2px;">
+            <div class="muted" style="font-size:20px; margin-bottom:8px;">Suggestions (dernier ${fmtLapTrim(sel.laps[sel.laps.length-1])}) :</div>
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:nowrap; overflow-x:auto;">
+            ${[-2,-1,0,1,2].map(o=>{ const v=Math.max(0,sel.laps[sel.laps.length-1]+o); return `<button class="lap-sugg" data-v="${fmtLapTrim(v)}" style="flex:none; white-space:nowrap; height:54px; padding:0 16px; border-radius:12px; border:1px solid ${o===0?'var(--accent)':'#322d22'}; background:${o===0?'#2a2110':'#1a1610'}; color:${o===0?'var(--accent)':'#cfc7b6'}; font-family:var(--mono); font-weight:700; font-size:24px;">${fmtLapTrim(v)}</button>`; }).join('')}
+            </div>
           </div>`:''}</div>
         <div class="panel" style="padding:26px 30px; display:flex; flex-direction:column; gap:12px; overflow:auto;">
           <div class="muted" style="font-size:22px;text-transform:uppercase;letter-spacing:2px;">Tours saisis — relais nº ${state.selSeg+1} · ${esc(selD)} · modifier / supprimer / réordonner</div>
