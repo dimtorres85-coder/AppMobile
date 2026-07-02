@@ -10,7 +10,17 @@ const FIREBASE_VERSION = '10.12.2';
 
 // Baked-in fallback so the app works out of the box without pasting the
 // config on every phone. A config saved locally (Réglages) always wins.
-const DEFAULT_FIREBASE_CONFIG = null; // TODO: paste the real firebaseConfig here
+// Not a secret: Firebase web config is safe to expose client-side, access
+// control is enforced by the Realtime Database security rules.
+const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyAs7Lo-yqRqGE-e7-85xuEn063bQeqPXDc",
+  authDomain: "endurance-tsc.firebaseapp.com",
+  databaseURL: "https://endurance-tsc-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "endurance-tsc",
+  storageBucket: "endurance-tsc.firebasestorage.app",
+  messagingSenderId: "720342518193",
+  appId: "1:720342518193:web:636b11420dcb00e3165590",
+};
 
 let firebaseModules = null; // { initializeApp, getDatabase, ref, set, onValue, off }
 let dbInstance = null;

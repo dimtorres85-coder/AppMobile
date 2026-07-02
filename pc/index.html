@@ -199,7 +199,17 @@ function qrSVG(text,px){ try{ const {g,size}=qrMatrix(text); const q=4, tot=size
 const FB_KEY='endu.fb.v1';
 // Config Firebase de secours, utilisée si rien n'a été collé dans Paramètres.
 // Une config enregistrée localement l'emporte toujours sur celle-ci.
-const DEFAULT_FB_CONFIG = null; // TODO: coller ici le vrai firebaseConfig
+// Ce n'est pas un secret : la config web Firebase est faite pour être publique,
+// la sécurité se fait via les règles de la Realtime Database.
+const DEFAULT_FB_CONFIG = {
+  apiKey: "AIzaSyAs7Lo-yqRqGE-e7-85xuEn063bQeqPXDc",
+  authDomain: "endurance-tsc.firebaseapp.com",
+  databaseURL: "https://endurance-tsc-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "endurance-tsc",
+  storageBucket: "endurance-tsc.firebasestorage.app",
+  messagingSenderId: "720342518193",
+  appId: "1:720342518193:web:636b11420dcb00e3165590",
+};
 let FB_VER = localStorage.getItem('endu.fbver') || '10.12.0';   // version du SDK Firebase, réglable dans les Paramètres
 function genCode(){ const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s=''; for(let i=0;i<4;i++) s+=A[Math.floor(Math.random()*A.length)]; return s; }
 function ensureCode(){ if(!state.sessionCode) state.sessionCode=genCode(); }
