@@ -59,6 +59,14 @@ export function isConfigured() {
   return !!loadTransportConfig();
 }
 
+// Fire-and-forget: attempt a connection as soon as a config is available,
+// instead of waiting for the first push/listen call. Lets the status dot
+// reflect real connectivity right away, which is the only visible proof
+// on a phone that the baked-in default config actually applies.
+export function connectIfConfigured() {
+  if (isConfigured()) ensureConnected().catch(() => {});
+}
+
 export function isConnected() {
   return connected;
 }
@@ -150,6 +158,47 @@ export function listenState(idCourse, cb) {
   ensureConnected().then((db) => {
     if (!db || cancelled) return;
     const r = firebaseModules.ref(db, `sessions/${idCourse}/state`);
+    const handler = (snap) => cb(snap.val());
+    firebaseModules.onValue(r, handler);
+    liveUnsub = () => firebaseModules.off(r, 'value', handler);
+  });
+  return () => {
+    cancelled = true;
+    if (liveUnsub) liveUnsub();
+  };
+}
+
+// ---- Single active mobile per session ----
+// Only one phone should be recording/pushing for a given course at a time.
+// Claiming the slot overwrites whoever was there before (eviction); every
+// paired phone listens to it to notice it got evicted.
+
+export async function claimActiveMobile(idCourse, payload) {
+  if (!idCourse) throw new Error('Pas de course appairée.');
+  const db = await ensureConnected();
+  if (!db) throw new Error('Relais indisponible.');
+  await firebaseModules.set(firebaseModules.ref(db, `sessions/${idCourse}/active_mobile`), payload);
+}
+
+// Best-effort release: only clears the slot if it's still this device's
+// claim, so it never wipes out a newer phone that has since taken over.
+export async function releaseActiveMobile(idCourse, deviceId) {
+  if (!idCourse) return;
+  const db = await ensureConnected();
+  if (!db) return;
+  await firebaseModules.runTransaction(
+    firebaseModules.ref(db, `sessions/${idCourse}/active_mobile`),
+    (current) => (!current || current.device_id === deviceId ? null : current)
+  );
+}
+
+// Returns an unsubscribe function. Silently no-ops if unconfigured.
+export function listenActiveMobile(idCourse, cb) {
+  let liveUnsub = null;
+  let cancelled = false;
+  ensureConnected().then((db) => {
+    if (!db || cancelled) return;
+    const r = firebaseModules.ref(db, `sessions/${idCourse}/active_mobile`);
     const handler = (snap) => cb(snap.val());
     firebaseModules.onValue(r, handler);
     liveUnsub = () => firebaseModules.off(r, 'value', handler);

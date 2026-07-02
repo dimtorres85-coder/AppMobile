@@ -19,6 +19,9 @@ export function createDefaultState() {
     // Pairing (§16.3)
     id_course: null,
     paired_ts: null,
+    // True once another phone has claimed sessions/{id}/active_mobile —
+    // blocks recording locally until this phone reclaims it.
+    ejected: false,
 
     created_ts: t,
     session_start_ts: null,

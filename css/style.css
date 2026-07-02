@@ -331,10 +331,27 @@ textarea.field { resize: none; }
   margin-top: 6px;
 }
 
-.pairing-joined { display: flex; align-items: center; gap: 12px; }
+.pairing-joined__row { display: flex; align-items: center; gap: 10px; }
 .pairing-joined__info { flex: 1; display: flex; align-items: baseline; gap: 9px; }
 .pairing-joined__label { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); letter-spacing: .1em; }
 .pairing-joined__code { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 26px; letter-spacing: .1em; color: var(--green); }
+
+.ejected-banner {
+  margin-top: 11px;
+  padding: 12px 14px;
+  background: var(--red-bg-2);
+  border: 1px solid var(--red-border);
+  border-radius: 12px;
+}
+.ejected-banner__msg {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  color: var(--red-3);
+}
 
 .pairing-join-row { display: flex; gap: 10px; margin-bottom: 10px; }
 .pairing-input {

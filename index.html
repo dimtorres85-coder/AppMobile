@@ -76,11 +76,18 @@
         <div class="card-label" style="margin-bottom:12px">Rejoindre une course</div>
 
         <div id="pairing-joined" class="pairing-joined hidden">
-          <div class="pairing-joined__info">
-            <span class="pairing-joined__label">COURSE</span>
-            <span id="pairing-code-display" class="pairing-joined__code">—</span>
+          <div class="pairing-joined__row">
+            <div class="pairing-joined__info">
+              <span class="pairing-joined__label">COURSE</span>
+              <span id="pairing-code-display" class="pairing-joined__code">—</span>
+            </div>
+            <button id="pairing-disconnect-btn" type="button" class="btn btn-danger-outline" style="flex:none;padding:11px 14px;min-height:auto">Déconnecter</button>
+            <button id="pairing-change-btn" type="button" class="btn btn-ghost" style="flex:none;padding:11px 14px;min-height:auto">Changer</button>
           </div>
-          <button id="pairing-change-btn" type="button" class="btn btn-ghost" style="flex:none;padding:11px 18px;min-height:auto">Changer</button>
+          <div id="pairing-ejected-banner" class="ejected-banner hidden">
+            <div class="ejected-banner__msg"><span>⚠</span><span>Un autre téléphone a pris le relais sur cette course.</span></div>
+            <button id="pairing-reclaim-btn" type="button" class="btn btn-gold" style="width:100%">Reprendre la main</button>
+          </div>
         </div>
 
         <div id="pairing-join" class="pairing-join">

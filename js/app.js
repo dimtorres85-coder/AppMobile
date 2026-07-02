@@ -9,6 +9,7 @@ let confirmCallback = null;
 let pairingEditMode = false;
 let lastFlashedRentreTs = null;
 let stateUnsubscribe = null;
+let activeMobileUnsubscribe = null;
 let flushingLaps = false;
 let alarmHoldTimer = null;
 const alarmAckUnsubscribes = new Map();
@@ -76,6 +77,9 @@ const el = {
   pairingJoinBtn: document.getElementById('pairing-join-btn'),
   pairingCodeDisplay: document.getElementById('pairing-code-display'),
   pairingChangeBtn: document.getElementById('pairing-change-btn'),
+  pairingDisconnectBtn: document.getElementById('pairing-disconnect-btn'),
+  pairingEjectedBanner: document.getElementById('pairing-ejected-banner'),
+  pairingReclaimBtn: document.getElementById('pairing-reclaim-btn'),
 
   qrModal: document.getElementById('qr-modal'),
   qrVideo: document.getElementById('qr-video'),
@@ -156,7 +160,7 @@ function goToPage(page) {
 // ---- Core actions (Phase A) ----
 
 function recordLap() {
-  if (!state.recording_active) return;
+  if (!state.recording_active || state.ejected) return;
   const t = now();
   const prevRef = state.last_lap_ts ?? state.session_start_ts;
   const valeur_chrono = Math.max(0, t - prevRef);
@@ -191,6 +195,10 @@ function undoLastLap() {
 }
 
 function toggleRecording() {
+  if (state.ejected) {
+    showToast('Reprends la main avant de modifier l’enregistrement.');
+    return;
+  }
   if (state.recording_active) {
     state.recording_active = false;
     showToast('Enregistrement en pause.');
@@ -320,10 +328,15 @@ function joinCourse(rawCode) {
   });
   state.id_course = code;
   state.paired_ts = now();
+  state.ejected = false;
   pairingEditMode = false;
   persist();
   render();
   subscribeToCourse();
+  // Take over the "active mobile" slot for this course — this is what
+  // evicts whoever else was paired on it (initial join, re-join, and the
+  // "Reprendre la main" recovery button all go through here).
+  transport.claimActiveMobile(code, { device_id: state.session_local_id, connected_ts: now() }).catch(() => {});
   showToast(`Course rejointe : ${code}`);
 }
 
@@ -332,6 +345,20 @@ function changeCourse() {
   el.pairingCodeInput.value = state.id_course || '';
   render();
   el.pairingCodeInput.focus();
+}
+
+function disconnectCourse() {
+  const code = state.id_course;
+  const deviceId = state.session_local_id;
+  teardownCourseSubscription();
+  state.id_course = null;
+  state.paired_ts = null;
+  state.ejected = false;
+  pairingEditMode = false;
+  persist();
+  render();
+  if (code) transport.releaseActiveMobile(code, deviceId).catch(() => {});
+  showToast('Déconnecté du réseau — les tours enregistrés restent en local.');
 }
 
 function supportsQr() {
@@ -407,6 +434,10 @@ function subscribeToCourse() {
   teardownCourseSubscription();
   if (!state.id_course || !transport.isConfigured()) return;
   stateUnsubscribe = transport.listenState(state.id_course, onPcState);
+  // Just listen here — claiming the slot only happens on an explicit
+  // joinCourse()/reclaim, never automatically on reload, or two phones
+  // would keep evicting each other on every page refresh.
+  activeMobileUnsubscribe = transport.listenActiveMobile(state.id_course, onActiveMobileChange);
   flushLapQueue();
 }
 
@@ -414,6 +445,22 @@ function teardownCourseSubscription() {
   if (stateUnsubscribe) {
     stateUnsubscribe();
     stateUnsubscribe = null;
+  }
+  if (activeMobileUnsubscribe) {
+    activeMobileUnsubscribe();
+    activeMobileUnsubscribe = null;
+  }
+}
+
+function onActiveMobileChange(val) {
+  const ejected = !!val && val.device_id !== state.session_local_id;
+  if (ejected === state.ejected) return;
+  state.ejected = ejected;
+  persist();
+  render();
+  if (ejected) {
+    showToast('⚠ Un autre téléphone a pris le relais sur cette course.');
+    vibrate([80, 60, 80]);
   }
 }
 
@@ -585,19 +632,24 @@ function render() {
   el.chronoPilotName.textContent = pilote ? pilote.nom : 'Aucun pilote sélectionné';
 
   const lapRef = state.last_lap_ts ?? state.session_start_ts;
-  el.currentLapValue.textContent = state.recording_active && lapRef !== null
+  el.currentLapValue.textContent = state.recording_active && !state.ejected && lapRef !== null
     ? formatDuration(now() - lapRef, { tenths: true })
     : '—';
 
-  el.tourBtn.disabled = !state.recording_active;
-  el.tourBtn.classList.toggle('paused', !state.recording_active);
-  el.tourPausedTag.classList.toggle('hidden', state.recording_active);
-  el.tourBtnHint.textContent = state.recording_active
-    ? 'Appuie à chaque passage sur la ligne'
-    : state.session_start_ts === null
-      ? 'Appuie sur Démarrer pour commencer'
-      : 'Enregistrement en pause';
+  const canRecord = state.recording_active && !state.ejected;
+  el.tourBtn.disabled = !canRecord;
+  el.tourBtn.classList.toggle('paused', !canRecord);
+  el.tourPausedTag.textContent = state.ejected ? 'Déconnecté' : 'En pause';
+  el.tourPausedTag.classList.toggle('hidden', canRecord);
+  el.tourBtnHint.textContent = state.ejected
+    ? 'Déconnecté — un autre téléphone a pris le relais'
+    : state.recording_active
+      ? 'Appuie à chaque passage sur la ligne'
+      : state.session_start_ts === null
+        ? 'Appuie sur Démarrer pour commencer'
+        : 'Enregistrement en pause';
 
+  el.recordingToggleBtn.disabled = state.ejected;
   if (state.recording_active) {
     el.recordingToggleBtn.textContent = 'STOP enregistrement';
     el.recordingToggleBtn.classList.remove('paused');
@@ -673,6 +725,7 @@ function renderPairing() {
   el.pairingJoin.classList.toggle('hidden', joined);
   el.pairingJoined.classList.toggle('hidden', !joined);
   el.pairingCodeDisplay.textContent = state.id_course || '—';
+  el.pairingEjectedBanner.classList.toggle('hidden', !(joined && state.ejected));
 }
 
 function pilotMarkSpan(cur) {
@@ -958,6 +1011,8 @@ el.pairingCodeInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinCourse(el.pairingCodeInput.value);
 });
 el.pairingChangeBtn.addEventListener('click', changeCourse);
+el.pairingDisconnectBtn.addEventListener('click', disconnectCourse);
+el.pairingReclaimBtn.addEventListener('click', () => joinCourse(state.id_course));
 el.pairingScanBtn.addEventListener('click', openQrScan);
 el.qrCancelBtn.addEventListener('click', closeQrScan);
 
@@ -1004,6 +1059,10 @@ el.pairingScanBtn.classList.toggle('hidden', !supportsQr());
 el.settingsConfigInput.value = transport.loadTransportConfig()
   ? JSON.stringify(transport.loadTransportConfig(), null, 2)
   : '';
+// Try connecting as soon as a config is available (default or saved),
+// instead of waiting for the first pairing/push — so the status dot on
+// the Accueil page reflects real connectivity right away.
+transport.connectIfConfigured();
 if (state.id_course) subscribeToCourse();
 state.alarms.filter((a) => !a.acked).forEach((a) => listenAlarmAckIfNeeded(a));
 
