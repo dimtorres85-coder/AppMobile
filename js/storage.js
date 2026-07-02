@@ -31,6 +31,11 @@ export function createDefaultState() {
     relais_estime_courant: 1,
     last_lap_ts: null,
     laps: [],
+    // True right after a pilot change driven by the PC (or a manual local
+    // correction): the last recorded lap belonged to whoever was current
+    // before, so showing it as "Dernier tour" would be misleading. Cleared
+    // as soon as a new lap is actually recorded.
+    last_lap_display_hidden: false,
 
     // Send queue bookkeeping (§16.6) — which laps got a confirmed write.
     synced_lap_ids: [],
@@ -46,6 +51,7 @@ export function createDefaultState() {
     course_snapshot: null,
     pause: false,
     rentre: null,
+    pc_pit_actif: false,
   };
 }
 

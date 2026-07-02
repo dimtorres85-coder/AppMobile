@@ -266,8 +266,13 @@ function fbBuildState(){ const cur=curRelais(); const t=now();
     const cible=cur.startedAt+max*1000+(cur.pausedMs||0)+livePauseMs();
     relais={ debut_ts:Math.round(cur.startedAt), cible_fin_ts:Math.round(cible), mode_alerte:mode }; }
   const fin = state.race.startedAt!=null ? Math.round(state.race.startedAt+state.cfg.durationSec*1000+state.race.pausedMs+livePauseMs()) : null;
+  // pit_actif couvre tout le workflow (arrêt physique + confirmation de la
+  // durée/du pilote), pas seulement state.pit.active qui retombe à false dès
+  // pitOut() — le mobile doit rester en pause jusqu'à ce que le nouveau
+  // relais (et donc pilote_courant) soit réellement confirmé.
+  const pitActif = state.phase==='pit' || state.phase==='pitc';
   return { pilote_courant:pilote, roster, relais, course: fin!=null?{fin_ts:fin}:null,
-    pause: !!state.pause.active, rentre: state.rentre||{actif:false,relais_id:null,ts:null}, maj_ts:Math.round(t) }; }
+    pause: !!state.pause.active, rentre: state.rentre||{actif:false,relais_id:null,ts:null}, pit_actif:pitActif, maj_ts:Math.round(t) }; }
 function onLapReceived(key,val){ if(!val) return; const id=val.id_unique||key; if(state.seenLaps[id]) return; state.seenLaps[id]=true;
   const sec = typeof val.valeur_chrono==='number'? val.valeur_chrono : parseLap(String(val.valeur_chrono||''));
   state.inbox.push({ id, ts:val.timestamp||now(), val:sec, pilote:val.pilote_vu_tel||'', relEst:val.id_relais_estime });

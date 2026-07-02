@@ -45,6 +45,11 @@
     <span class="nav-item__icon">⚙</span>
     <span class="nav-item__label">Course</span>
   </button>
+  <button type="button" class="nav-item" data-page="historique">
+    <span class="nav-item__bar"></span>
+    <span class="nav-item__icon">▤</span>
+    <span class="nav-item__label">Historique</span>
+  </button>
 </nav>
 
 <div class="content-col">
@@ -215,6 +220,19 @@
       <div class="course-actions">
         <button id="export-btn" type="button" class="btn btn-orange">⬇  Exporter (secours USB)</button>
         <button id="reset-btn" type="button" class="btn btn-danger-outline">Nouvelle session</button>
+      </div>
+    </section>
+
+    <!-- ===== PAGE : HISTORIQUE ===== -->
+    <section id="page-historique" class="page hidden">
+      <h1 class="page-title" style="margin-bottom:16px">Historique</h1>
+      <div id="hist-tabs" class="hist-tabs"></div>
+      <div class="laps-card">
+        <div class="laps-card__head">
+          <span class="laps-card__title" id="hist-pilot-name">—</span>
+          <span class="laps-card__count">· <span id="hist-laps-count">0</span></span>
+        </div>
+        <ul id="hist-laps-list" style="list-style:none;margin:0;padding:0"></ul>
       </div>
     </section>
 

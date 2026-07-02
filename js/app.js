@@ -15,6 +15,8 @@ let alarmHoldTimer = null;
 const alarmAckUnsubscribes = new Map();
 let qrStream = null;
 let qrRafId = null;
+let histSelRelais = null;
+let histFollowCurrent = true; // false once the user manually picks an older relay tab
 
 const ALARM_HOLD_MS = 1200;
 const ALARM_IDLE_SUB = 'Maintiens le bouton appuyé pour prévenir le PC';
@@ -28,6 +30,7 @@ const el = {
     chrono: document.getElementById('page-chrono'),
     alerte: document.getElementById('page-alerte'),
     course: document.getElementById('page-course'),
+    historique: document.getElementById('page-historique'),
   },
 
   timerSession: document.getElementById('timer-session'),
@@ -50,6 +53,11 @@ const el = {
   lapsPending: document.getElementById('laps-pending'),
   exportBtn: document.getElementById('export-btn'),
   resetBtn: document.getElementById('reset-btn'),
+
+  histTabs: document.getElementById('hist-tabs'),
+  histPilotName: document.getElementById('hist-pilot-name'),
+  histLapsCount: document.getElementById('hist-laps-count'),
+  histLapsList: document.getElementById('hist-laps-list'),
 
   chronoPilotBtn: document.getElementById('chrono-pilot-btn'),
   chronoPilotName: document.getElementById('chrono-pilot-name'),
@@ -151,12 +159,16 @@ function showToast(message) {
 function goToPage(page) {
   if (!el.pages[page]) return;
   currentPage = page;
+  // Coming back to Historique later should default to the current relay
+  // again, not silently keep showing whatever was picked last visit.
+  if (page === 'historique') histFollowCurrent = true;
   for (const [name, section] of Object.entries(el.pages)) {
     section.classList.toggle('hidden', name !== page);
   }
   for (const btn of el.navRail.querySelectorAll('.nav-item')) {
     btn.classList.toggle('active', btn.dataset.page === page);
   }
+  render();
 }
 
 // ---- Core actions (Phase A) ----
@@ -179,6 +191,7 @@ function recordLap() {
 
   state.laps.push(lap);
   state.last_lap_ts = t;
+  state.last_lap_display_hidden = false;
   persist();
   render();
   flushLapQueue();
@@ -265,6 +278,9 @@ function selectPilote(id) {
   // New pilot, new stint: the running "chrono en cours" and the next lap
   // must start clean, not inherit elapsed time from the previous pilot.
   if (state.recording_active) state.last_lap_ts = now();
+  // The last recorded lap belonged to whoever was current before — showing
+  // it as "Dernier tour" for the newly-selected pilot would be misleading.
+  state.last_lap_display_hidden = true;
   persist();
   render();
   showToast('Pilote : ' + (currentPilote()?.nom || ''));
@@ -523,6 +539,9 @@ function syncPiloteWithPc(nom) {
   if (!pilote || pilote.id === state.pilote_courant_id) return false;
   state.pilote_courant_id = pilote.id;
   state.relais_estime_courant += 1;
+  // Same reasoning as selectPilote(): the last lap on screen belonged to
+  // the outgoing pilot, not this one.
+  state.last_lap_display_hidden = true;
   return true;
 }
 
@@ -561,6 +580,18 @@ function onPcState(raw) {
   state.course_snapshot = raw.course || null;
   state.pause = !!raw.pause;
   state.rentre = raw.rentre || null;
+
+  const pitActif = !!raw.pit_actif;
+  // The bike is stopped in the pits: the lap in progress no longer means
+  // anything, so pause exactly like a manual STOP. The human resumes with
+  // TOUR once the new rider is actually back on track — never automatic,
+  // since the pit workflow resolving doesn't mean the bike has left yet.
+  if (pitActif && !state.pc_pit_actif && state.recording_active) {
+    state.recording_active = false;
+    showToast('⏸ Pit signalé par le PC — chrono en pause.');
+  }
+  state.pc_pit_actif = pitActif;
+
   state.pc_state_recv_ts = now();
   persist();
   render();
@@ -725,7 +756,9 @@ function render() {
   el.lapsCount.textContent = state.laps.length;
 
   const lastLap = state.laps[state.laps.length - 1];
-  el.lastLapValue.textContent = lastLap ? formatDuration(lastLap.valeur_chrono, { tenths: true }) : '—';
+  el.lastLapValue.textContent = (lastLap && !state.last_lap_display_hidden)
+    ? formatDuration(lastLap.valeur_chrono, { tenths: true })
+    : '—';
 
   renderLapsList();
   renderPending();
@@ -736,6 +769,7 @@ function render() {
   renderRelais();
   renderDivergence();
   renderAlarmStatus();
+  renderHistorique();
   el.navAlertDot.classList.toggle('hidden', !(state.rentre && state.rentre.actif));
 }
 
@@ -753,6 +787,38 @@ function renderPending() {
   el.lapsPending.classList.remove('hidden');
 }
 
+// pilote_vu_tel is free-text the user typed as a pilot name, so this is
+// built from DOM nodes + textContent rather than innerHTML.
+function buildLapRow(lap, index) {
+  const li = document.createElement('li');
+  li.className = 'lap-row';
+
+  const n = document.createElement('span');
+  n.className = 'lap-row__n';
+  n.textContent = String(index);
+
+  const mid = document.createElement('div');
+  mid.className = 'lap-row__mid';
+  const t = document.createElement('div');
+  t.className = 'lap-row__t';
+  t.textContent = formatDuration(lap.valeur_chrono, { tenths: true });
+  const pilot = document.createElement('div');
+  pilot.className = 'lap-row__pilot';
+  pilot.textContent = lap.pilote_vu_tel || '—';
+  mid.appendChild(t);
+  mid.appendChild(pilot);
+
+  const d = new Date(lap.timestamp);
+  const clock = document.createElement('span');
+  clock.className = 'lap-row__clock';
+  clock.textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+
+  li.appendChild(n);
+  li.appendChild(mid);
+  li.appendChild(clock);
+  return li;
+}
+
 function renderLapsList() {
   el.lapsList.innerHTML = '';
   const laps = state.laps.slice().reverse().slice(0, 20);
@@ -764,19 +830,61 @@ function renderLapsList() {
     return;
   }
   laps.forEach((lap) => {
-    const index = state.laps.indexOf(lap) + 1;
-    const li = document.createElement('li');
-    li.className = 'lap-row';
-    const d = new Date(lap.timestamp);
-    li.innerHTML = `
-      <span class="lap-row__n">${index}</span>
-      <div class="lap-row__mid">
-        <div class="lap-row__t">${formatDuration(lap.valeur_chrono, { tenths: true })}</div>
-        <div class="lap-row__pilot">${lap.pilote_vu_tel || '—'}</div>
-      </div>
-      <span class="lap-row__clock">${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}</span>
-    `;
-    el.lapsList.appendChild(li);
+    el.lapsList.appendChild(buildLapRow(lap, state.laps.indexOf(lap) + 1));
+  });
+}
+
+// ---- Historique (per-relay lap history, mirrors the PC's segment tabs) ----
+
+function relaisGroups() {
+  const groups = new Map(); // id_relais_estime -> laps[]
+  state.laps.forEach((lap) => {
+    const key = lap.id_relais_estime ?? 0;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(lap);
+  });
+  // Always include the current relay, even with zero laps yet.
+  if (!groups.has(state.relais_estime_courant)) groups.set(state.relais_estime_courant, []);
+  return [...groups.keys()].sort((a, b) => a - b).map((id) => ({ id, laps: groups.get(id) }));
+}
+
+function renderHistorique() {
+  const groups = relaisGroups();
+  if (histFollowCurrent || !groups.some((g) => g.id === histSelRelais)) {
+    histSelRelais = state.relais_estime_courant;
+  }
+
+  el.histTabs.innerHTML = '';
+  groups.forEach((g) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'hist-tab' + (g.id === histSelRelais ? ' current' : '');
+    btn.textContent = `R${g.id} · ${g.laps.length} t`;
+    btn.addEventListener('click', () => {
+      histSelRelais = g.id;
+      histFollowCurrent = g.id === state.relais_estime_courant;
+      renderHistorique();
+    });
+    el.histTabs.appendChild(btn);
+  });
+
+  const sel = groups.find((g) => g.id === histSelRelais) || { id: histSelRelais, laps: [] };
+  const pilotName = sel.laps.length
+    ? sel.laps[0].pilote_vu_tel || '—'
+    : (sel.id === state.relais_estime_courant ? (currentPilote()?.nom || '—') : '—');
+  el.histPilotName.textContent = `R${sel.id} · ${pilotName}`;
+  el.histLapsCount.textContent = sel.laps.length;
+
+  el.histLapsList.innerHTML = '';
+  if (sel.laps.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'laps-empty';
+    empty.textContent = 'Aucun tour enregistré pour ce relais.';
+    el.histLapsList.appendChild(empty);
+    return;
+  }
+  sel.laps.forEach((lap, i) => {
+    el.histLapsList.appendChild(buildLapRow(lap, i + 1));
   });
 }
 
