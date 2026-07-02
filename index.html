@@ -113,6 +113,20 @@
         <span id="chrono-session-time" class="chrono-header__clock">0:00</span>
       </div>
 
+      <div class="card pilot-chip-card">
+        <div class="card-label">Pilote en cours</div>
+        <button id="chrono-pilot-btn" type="button" class="pilot-chip">
+          <span id="chrono-pilot-name" class="pilot-chip__name">Aucun pilote sélectionné</span>
+          <span class="pilot-chip__change">Changer ▾</span>
+        </button>
+        <div id="chrono-pilot-list" class="pilot-list hidden"></div>
+      </div>
+
+      <div class="card session-card current-lap-card">
+        <div class="card-label">Chrono en cours</div>
+        <div id="current-lap-value" class="session-card__value">—</div>
+      </div>
+
       <div id="relais-card" class="relay-card hidden">
         <div id="relais-label" class="relay-card__label">Fin de relais</div>
         <div id="relais-countdown" class="relay-card__value">--:--</div>
@@ -180,8 +194,8 @@
       </div>
 
       <div class="card">
-        <div class="card-label" style="margin-bottom:4px">Changer le pilote</div>
-        <p class="card-desc">Tu penses que le mec sur la moto n'est pas le bon ?</p>
+        <div class="card-label" style="margin-bottom:4px">Pilotes</div>
+        <p class="card-desc">Change le pilote, ou supprime-en un de la liste (ses tours déjà enregistrés restent dans l'historique).</p>
         <div id="pilote-list" class="pilot-list"></div>
         <form id="pilote-add-form" class="add-pilot-row">
           <input id="pilote-add-input" type="text" class="field" placeholder="Nouveau pilote…" autocomplete="off" required>

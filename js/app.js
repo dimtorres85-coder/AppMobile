@@ -39,6 +39,7 @@ const el = {
   tourPausedTag: document.getElementById('tour-paused-tag'),
   tourBtnHint: document.getElementById('tour-btn-hint'),
   lastLapValue: document.getElementById('last-lap-value'),
+  currentLapValue: document.getElementById('current-lap-value'),
   recordingToggleBtn: document.getElementById('recording-toggle-btn'),
   undoBtn: document.getElementById('undo-btn'),
   lapsList: document.getElementById('laps-list'),
@@ -46,6 +47,10 @@ const el = {
   lapsPending: document.getElementById('laps-pending'),
   exportBtn: document.getElementById('export-btn'),
   resetBtn: document.getElementById('reset-btn'),
+
+  chronoPilotBtn: document.getElementById('chrono-pilot-btn'),
+  chronoPilotName: document.getElementById('chrono-pilot-name'),
+  chronoPilotList: document.getElementById('chrono-pilot-list'),
 
   pilotList: document.getElementById('pilote-list'),
   pilotAddForm: document.getElementById('pilote-add-form'),
@@ -224,9 +229,31 @@ function selectPilote(id) {
   if (id === state.pilote_courant_id) return;
   state.pilote_courant_id = id;
   state.relais_estime_courant += 1;
+  // New pilot, new stint: the running "chrono en cours" and the next lap
+  // must start clean, not inherit elapsed time from the previous pilot.
+  if (state.recording_active) state.last_lap_ts = now();
   persist();
   render();
   showToast('Pilote : ' + (currentPilote()?.nom || ''));
+}
+
+function deletePilote(id) {
+  const pilote = state.pilotes.find((p) => p.id === id);
+  if (!pilote) return;
+  if (id === state.pilote_courant_id) {
+    showToast('Change de pilote avant de supprimer celui-ci.');
+    return;
+  }
+  openConfirm(
+    'Supprimer ce pilote ?',
+    `${pilote.nom} sera retiré de la liste. Ses tours déjà enregistrés restent dans l'historique.`,
+    () => {
+      state.pilotes = state.pilotes.filter((p) => p.id !== id);
+      persist();
+      render();
+      showToast('Pilote supprimé.');
+    }
+  );
 }
 
 function resetSession() {
@@ -555,6 +582,12 @@ function render() {
 
   const pilote = currentPilote();
   el.pilotActuel.textContent = pilote ? pilote.nom : 'Aucun pilote sélectionné';
+  el.chronoPilotName.textContent = pilote ? pilote.nom : 'Aucun pilote sélectionné';
+
+  const lapRef = state.last_lap_ts ?? state.session_start_ts;
+  el.currentLapValue.textContent = state.recording_active && lapRef !== null
+    ? formatDuration(now() - lapRef, { tenths: true })
+    : '—';
 
   el.tourBtn.disabled = !state.recording_active;
   el.tourBtn.classList.toggle('paused', !state.recording_active);
@@ -586,6 +619,7 @@ function render() {
   renderPending();
   renderPairing();
   renderPiloteList();
+  renderChronoPilotList();
   renderConnectivity();
   renderRelais();
   renderDivergence();
@@ -641,6 +675,21 @@ function renderPairing() {
   el.pairingCodeDisplay.textContent = state.id_course || '—';
 }
 
+function pilotMarkSpan(cur) {
+  const mark = document.createElement('span');
+  mark.className = 'pilot-row-btn__mark';
+  mark.textContent = cur ? '●' : '';
+  return mark;
+}
+
+function pilotNameSpan(nom) {
+  const name = document.createElement('span');
+  name.className = 'pilot-row-btn__name';
+  name.textContent = nom;
+  return name;
+}
+
+// Course page: full management list — select or delete each pilot.
 function renderPiloteList() {
   el.pilotList.innerHTML = '';
   if (state.pilotes.length === 0) {
@@ -653,12 +702,52 @@ function renderPiloteList() {
   }
   state.pilotes.forEach((p) => {
     const cur = p.id === state.pilote_courant_id;
+    const row = document.createElement('div');
+    row.className = 'pilot-row' + (cur ? ' current' : '');
+
+    const select = document.createElement('button');
+    select.type = 'button';
+    select.className = 'pilot-row__select';
+    select.appendChild(pilotMarkSpan(cur));
+    select.appendChild(pilotNameSpan(p.nom));
+    select.addEventListener('click', () => selectPilote(p.id));
+    row.appendChild(select);
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'pilot-row__delete';
+    del.textContent = '✕';
+    del.setAttribute('aria-label', 'Supprimer ' + p.nom);
+    del.addEventListener('click', () => deletePilote(p.id));
+    row.appendChild(del);
+
+    el.pilotList.appendChild(row);
+  });
+}
+
+// Chrono page: quick picker — tap a pilot to switch and close the list.
+function renderChronoPilotList() {
+  el.chronoPilotList.innerHTML = '';
+  if (state.pilotes.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'card-desc';
+    empty.style.margin = '0';
+    empty.textContent = 'Aucun pilote enregistré (ajoute-en un dans Course).';
+    el.chronoPilotList.appendChild(empty);
+    return;
+  }
+  state.pilotes.forEach((p) => {
+    const cur = p.id === state.pilote_courant_id;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'pilot-row-btn' + (cur ? ' current' : '');
-    btn.innerHTML = `<span class="pilot-row-btn__mark">${cur ? '●' : ''}</span><span class="pilot-row-btn__name">${p.nom}</span>`;
-    btn.addEventListener('click', () => selectPilote(p.id));
-    el.pilotList.appendChild(btn);
+    btn.appendChild(pilotMarkSpan(cur));
+    btn.appendChild(pilotNameSpan(p.nom));
+    btn.addEventListener('click', () => {
+      selectPilote(p.id);
+      el.chronoPilotList.classList.add('hidden');
+    });
+    el.chronoPilotList.appendChild(btn);
   });
 }
 
@@ -835,6 +924,9 @@ for (const btn of el.navRail.querySelectorAll('.nav-item')) {
 el.tourBtn.addEventListener('click', recordLap);
 el.undoBtn.addEventListener('click', undoLastLap);
 el.recordingToggleBtn.addEventListener('click', toggleRecording);
+el.chronoPilotBtn.addEventListener('click', () => {
+  el.chronoPilotList.classList.toggle('hidden');
+});
 el.pilotAddForm.addEventListener('submit', (e) => {
   e.preventDefault();
   addPilote(el.pilotAddInput.value);

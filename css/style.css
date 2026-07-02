@@ -664,6 +664,7 @@ textarea.field { resize: none; }
 }
 
 .pilot-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+/* Simple picker row (Chrono page): the whole row is the select button, no delete. */
 .pilot-row-btn {
   display: flex;
   align-items: center;
@@ -679,6 +680,75 @@ textarea.field { resize: none; }
 .pilot-row-btn__mark { width: 18px; flex: none; color: var(--gold); font-size: 14px; }
 .pilot-row-btn__name { flex: 1; font-weight: 700; font-size: 17px; color: var(--text); }
 .pilot-row-btn.current .pilot-row-btn__name { color: var(--gold); }
+
+/* Manageable row (Course page): select button + delete button side by side. */
+.pilot-row {
+  display: flex;
+  align-items: stretch;
+  background: var(--card-strong);
+  border: 1px solid var(--border-3);
+  border-radius: 13px;
+  overflow: hidden;
+}
+.pilot-row.current { background: var(--amber-bg); border-color: var(--amber-border); }
+.pilot-row__select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.pilot-row__delete {
+  flex: none;
+  width: 46px;
+  border: none;
+  border-left: 1px solid var(--border-3);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+}
+.pilot-row__delete:active { background: var(--red-bg); color: var(--red-3); }
+
+/* Pilot chip on the Chrono page: name + inline "Changer" toggle. */
+.pilot-chip-card { padding-bottom: 12px; }
+.pilot-chip {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.pilot-chip__name {
+  font-family: 'Barlow Semi Condensed', 'Barlow', sans-serif;
+  font-weight: 800;
+  font-size: 24px;
+  color: var(--text);
+}
+.pilot-chip__change {
+  flex: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--gold);
+}
+.pilot-chip-card .pilot-list { margin-top: 12px; margin-bottom: 0; }
+
+.current-lap-card { padding-bottom: 14px; }
+.current-lap-card .session-card__value { color: var(--orange); }
 
 .add-pilot-row { display: flex; gap: 9px; }
 .add-pilot-row input {
