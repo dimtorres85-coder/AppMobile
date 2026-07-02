@@ -1180,6 +1180,16 @@ const SCREENS = {
             <span class="muted" style="font-size:20px;">min</span>
             <label style="display:flex; align-items:center; gap:8px; font-size:24px; font-weight:700; color:${state.cfg.alerts.fuel?'var(--green)':'var(--muted)'};">
               <input type="checkbox" id="se-fuel" ${state.cfg.alerts.fuel?'checked':''} style="width:26px;height:26px;accent-color:var(--green);"> ${state.cfg.alerts.fuel?'ON':'OFF'}</label></div></div>
+        <div class="panel" style="padding:22px 28px; display:flex; align-items:center; justify-content:space-between; gap:20px;">
+          <div><div style="font-size:26px; font-weight:600;">Alerte fin de relais</div>
+            <div class="muted" style="font-size:20px;">Déclenche « FAIRE RENTRER LE PILOTE » quand ce seuil est atteint. Modifiable à tout moment pendant la course.</div></div>
+          <div style="display:flex; align-items:center; gap:14px;">
+            <select class="field" id="se-relmode" style="font-size:26px; padding:8px 12px; width:auto;">
+              <option value="time" ${state.cfg.alerts.relaisMode==='time'?'selected':''}>Temps (min)</option>
+              <option value="laps" ${state.cfg.alerts.relaisMode==='laps'?'selected':''}>Nb de tours</option></select>
+            <input class="field mono" id="se-relval"
+              value="${state.cfg.alerts.relaisMode==='time'?Math.round(state.cfg.alerts.relaisTime/60):state.cfg.alerts.relaisLaps}"
+              style="width:110px; text-align:center; font-size:30px;"></div></div>
         <div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:12px;">
           <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Stratégie de relais — ordre &amp; pilotes actifs</div>
           ${strategyRows()}
@@ -1303,6 +1313,8 @@ function wire(){
     on('se-remaining-go','click',()=>applyRemaining($('#se-remaining').value));
     const fc=$('#se-fuel'); if(fc) fc.addEventListener('change',()=>{ state.cfg.alerts.fuel=fc.checked; state.ack.fuel=false; save(); render(); toast(fc.checked?'Alerte plein activée':'Alerte plein désactivée'); });
     const fm=$('#se-fuelmin'); if(fm) fm.addEventListener('change',()=>{ state.cfg.fuelSec=(Number(fm.value)||0)*60; state.ack.fuel=false; save(); toast('Plein mis à jour'); });
+    const rm=$('#se-relmode'); if(rm) rm.addEventListener('change',()=>{ state.cfg.alerts.relaisMode=rm.value; state.ack.relais=false; save(); render(); toast('Mode d’alerte fin de relais : '+(rm.value==='laps'?'nb de tours':'temps')); });
+    const rv=$('#se-relval'); if(rv) rv.addEventListener('change',()=>{ const v=Number(rv.value)||0; if(state.cfg.alerts.relaisMode==='time') state.cfg.alerts.relaisTime=v*60; else state.cfg.alerts.relaisLaps=v; state.ack.relais=false; save(); toast('Seuil d’alerte fin de relais mis à jour'); });
     // synchro mobile
     const ns=$('#netstat'); if(ns){ const s=netState(); ns.innerHTML='<span style="color:'+s.c+'">'+s.d+'</span> '+s.t; }
     const applyVer=()=>{ const v=$('#fb-ver'); if(v&&v.value.trim()){ FB_VER=v.value.trim(); localStorage.setItem('endu.fbver',FB_VER); } };
