@@ -526,7 +526,6 @@ textarea.field { resize: none; }
 .rec-controls { display: flex; gap: 10px; margin: 10px 0; }
 .rec-controls .btn { flex: 1; padding: 13px 6px; font-size: 13.5px; min-height: 42px; }
 .rec-toggle-btn { background: transparent; border: 1px solid var(--border-5); color: var(--amber); }
-.rec-toggle-btn.paused { background: #2a1e06; border-color: #7a5a12; }
 .undo-btn { background: transparent; border: 1px solid var(--border-4); color: var(--text-soft); }
 
 .laps-card {

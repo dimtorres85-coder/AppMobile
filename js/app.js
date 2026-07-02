@@ -193,12 +193,27 @@ function startSession() {
   showToast('Session démarrée.');
 }
 
-// The big round button doubles as Start (before the session exists) and
-// Lap (once running) — like a real stopwatch's start/split button.
+function resumeRecording() {
+  state.recording_active = true;
+  // A pause can last a while; resetting the reference point avoids the
+  // next lap silently absorbing the paused duration.
+  state.last_lap_ts = now();
+  persist();
+  render();
+  showToast('Enregistrement repris.');
+}
+
+// The big round button is the only one that ever (re)starts things — like
+// a real stopwatch's start/split button: Start before a session exists,
+// Resume if paused, Lap once running. STOP only ever stops (pauseRecording).
 function handleTourPress() {
   if (state.ejected) return;
   if (state.session_start_ts === null) {
     startSession();
+    return;
+  }
+  if (!state.recording_active) {
+    resumeRecording();
     return;
   }
   recordLap();
@@ -216,26 +231,17 @@ function undoLastLap() {
   showToast('Dernier tour annulé.');
 }
 
-// Pause/resume only — starting the session lives on the TOUR button now
-// (handleTourPress), so this button always has a single, unambiguous job.
-function toggleRecording() {
+// Stops only — never resumes. Resuming is a TOUR press (handleTourPress).
+function pauseRecording() {
   if (state.ejected) {
     showToast('Reprends la main avant de modifier l’enregistrement.');
     return;
   }
-  if (state.session_start_ts === null) return; // nothing to stop/resume yet
-  if (state.recording_active) {
-    state.recording_active = false;
-    showToast('Enregistrement en pause.');
-  } else {
-    state.recording_active = true;
-    // A pause can last a while; resetting the reference point avoids the
-    // next lap silently absorbing the paused duration.
-    state.last_lap_ts = now();
-    showToast('Enregistrement repris.');
-  }
+  if (!state.recording_active) return; // already stopped, nothing to do
+  state.recording_active = false;
   persist();
   render();
+  showToast('Enregistrement en pause.');
 }
 
 function addPilote(nomRaw) {
@@ -690,17 +696,17 @@ function render() {
     ? formatDuration(now() - lapRef, { tenths: true })
     : '—';
 
-  // The round button is Start before a session exists, then Lap once
-  // running — a real stopwatch's start/split button. It's only disabled
-  // while genuinely paused (already started) or ejected; "not started yet"
-  // is a normal, tappable state (that's how you start it).
+  // The round button is the only one that (re)starts things — Start before
+  // a session exists, Resume if paused, Lap once running. It's only ever
+  // disabled when ejected: unlike before, "paused" is still a tappable
+  // state here (that's how you resume).
   const started = state.session_start_ts !== null;
-  const canPress = !state.ejected && (!started || state.recording_active);
+  const canPress = !state.ejected;
   el.tourBtn.disabled = !canPress;
   el.tourBtn.classList.toggle('paused', !canPress);
-  el.tourBtnLabel.textContent = started ? 'TOUR' : 'DÉMARRER';
-  el.tourBtnLabel.classList.toggle('tour-btn__label--start', !started);
-  el.tourPausedTag.textContent = state.ejected ? 'Déconnecté' : 'En pause';
+  el.tourBtnLabel.textContent = !started ? 'DÉMARRER' : state.recording_active ? 'TOUR' : 'REPRENDRE';
+  el.tourBtnLabel.classList.toggle('tour-btn__label--start', !started || !state.recording_active);
+  el.tourPausedTag.textContent = 'Déconnecté';
   el.tourPausedTag.classList.toggle('hidden', canPress);
   el.tourBtnHint.textContent = state.ejected
     ? 'Déconnecté — un autre téléphone a pris le relais'
@@ -708,18 +714,12 @@ function render() {
       ? 'Appuie pour démarrer le chrono'
       : state.recording_active
         ? 'Appuie à chaque passage sur la ligne'
-        : 'Enregistrement en pause';
+        : 'En pause — appuie sur TOUR pour reprendre';
 
-  // STOP/REPRENDRE now has a single job: pause/resume an already-running
-  // session. Nothing to do before the session has started.
-  el.recordingToggleBtn.disabled = state.ejected || !started;
-  if (!started || state.recording_active) {
-    el.recordingToggleBtn.textContent = 'STOP';
-    el.recordingToggleBtn.classList.remove('paused');
-  } else {
-    el.recordingToggleBtn.textContent = 'REPRENDRE';
-    el.recordingToggleBtn.classList.add('paused');
-  }
+  // STOP only ever stops: enabled while actively recording, disabled
+  // otherwise (nothing to stop before starting or while already paused).
+  el.recordingToggleBtn.disabled = state.ejected || !started || !state.recording_active;
+  el.recordingToggleBtn.textContent = 'STOP';
 
   el.undoBtn.disabled = state.laps.length === 0;
   el.lapsCount.textContent = state.laps.length;
@@ -1047,7 +1047,7 @@ for (const btn of el.navRail.querySelectorAll('.nav-item')) {
 
 el.tourBtn.addEventListener('click', handleTourPress);
 el.undoBtn.addEventListener('click', undoLastLap);
-el.recordingToggleBtn.addEventListener('click', toggleRecording);
+el.recordingToggleBtn.addEventListener('click', pauseRecording);
 el.chronoPilotBtn.addEventListener('click', () => {
   el.chronoPilotList.classList.toggle('hidden');
 });
