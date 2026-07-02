@@ -129,6 +129,9 @@ const el = {
   themeLightBtn: document.getElementById('theme-light-btn'),
   themeDarkBtn: document.getElementById('theme-dark-btn'),
 
+  notifEnableBtn: document.getElementById('notif-enable-btn'),
+  notifStatus: document.getElementById('notif-status'),
+
   soundRentre: document.getElementById('sound-rentre'),
   soundRentreTest: document.getElementById('sound-rentre-test'),
   soundFinish: document.getElementById('sound-finish'),
@@ -1128,6 +1131,20 @@ function renderAlarmStatus() {
   }
 }
 
+// Best-effort system notification for when the app is backgrounded (another
+// tab/app in front, screen dimmed but not yet suspended). This can NOT wake
+// a fully locked/suspended phone — that needs real Web Push from a server,
+// which this app doesn't have. It only helps the "phone unlocked, app just
+// not in front" case, which is still the most common one in practice.
+function notifyBackground(title, body) {
+  if (document.visibilityState !== 'hidden') return;
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!navigator.serviceWorker) return;
+  navigator.serviceWorker.ready.then((reg) => {
+    reg.showNotification(title, { body, tag: title, renotify: true, icon: './icons/icon-192.png', vibrate: [200, 100, 200] });
+  }).catch(() => {});
+}
+
 // True once the PC has an active "faire rentrer le pilote" signal AND the
 // user hasn't already acked this specific instance of it (by ts). Acking
 // resolves it everywhere immediately, without waiting on the PC round-trip.
@@ -1148,6 +1165,7 @@ function maybeSignalRentre() {
     el.rentreOverlay.classList.remove('hidden');
     playPreset(state.sound_prefs.rentre);
     vibrate([200, 100, 200, 100, 400]);
+    notifyBackground('Faire rentrer le pilote', 'Le PC demande de faire rentrer le pilote au stand.');
   }
 }
 
@@ -1178,6 +1196,7 @@ function maybeSignalRaceOver() {
     raceOverSignaled = true;
     playPreset(state.sound_prefs.finish);
     vibrate([150, 80, 150, 80, 300]);
+    notifyBackground('Course terminée', 'Va chercher les bières !');
   }
 }
 
@@ -1293,6 +1312,30 @@ el.themeDarkBtn.addEventListener('click', () => {
   persist();
   render();
 });
+
+function renderNotifStatus() {
+  if (!('Notification' in window)) {
+    el.notifEnableBtn.classList.add('hidden');
+    el.notifStatus.textContent = 'Notifications non supportées par ce navigateur.';
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    el.notifEnableBtn.classList.add('hidden');
+    el.notifStatus.textContent = '✓ Notifications activées.';
+  } else if (Notification.permission === 'denied') {
+    el.notifEnableBtn.classList.add('hidden');
+    el.notifStatus.textContent = '✕ Notifications bloquées — active-les dans les réglages du navigateur.';
+  } else {
+    el.notifEnableBtn.classList.remove('hidden');
+    el.notifStatus.textContent = '';
+  }
+}
+if ('Notification' in window) {
+  el.notifEnableBtn.addEventListener('click', () => {
+    Notification.requestPermission().then(renderNotifStatus);
+  });
+}
+renderNotifStatus();
 
 el.soundRentre.addEventListener('change', () => {
   state.sound_prefs.rentre = el.soundRentre.value;
