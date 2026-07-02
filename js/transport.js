@@ -8,6 +8,10 @@
 const CONFIG_KEY = 'trackside_transport_config_v1';
 const FIREBASE_VERSION = '10.12.2';
 
+// Baked-in fallback so the app works out of the box without pasting the
+// config on every phone. A config saved locally (Réglages) always wins.
+const DEFAULT_FIREBASE_CONFIG = null; // TODO: paste the real firebaseConfig here
+
 let firebaseModules = null; // { initializeApp, getDatabase, ref, set, onValue, off }
 let dbInstance = null;
 let connectingPromise = null;
@@ -17,14 +21,14 @@ const connectivityListeners = new Set();
 export function loadTransportConfig() {
   try {
     const raw = window.localStorage.getItem(CONFIG_KEY);
-    if (!raw) return null;
-    const cfg = JSON.parse(raw);
-    if (!cfg || typeof cfg !== 'object' || !cfg.databaseURL) return null;
-    return cfg;
+    if (raw) {
+      const cfg = JSON.parse(raw);
+      if (cfg && typeof cfg === 'object' && cfg.databaseURL) return cfg;
+    }
   } catch (err) {
     console.error('Config relais illisible.', err);
-    return null;
   }
+  return DEFAULT_FIREBASE_CONFIG;
 }
 
 export function saveTransportConfig(cfg) {

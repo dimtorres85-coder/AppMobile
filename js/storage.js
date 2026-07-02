@@ -21,8 +21,8 @@ export function createDefaultState() {
     paired_ts: null,
 
     created_ts: t,
-    session_start_ts: t,
-    recording_active: true,
+    session_start_ts: null,
+    recording_active: false,
     pilotes: [],
     pilote_courant_id: null,
     relais_estime_courant: 1,

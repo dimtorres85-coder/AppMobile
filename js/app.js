@@ -189,6 +189,12 @@ function toggleRecording() {
   if (state.recording_active) {
     state.recording_active = false;
     showToast('Enregistrement en pause.');
+  } else if (state.session_start_ts === null) {
+    // First start: nothing runs until the user explicitly taps Démarrer.
+    state.session_start_ts = now();
+    state.recording_active = true;
+    state.last_lap_ts = null;
+    showToast('Session démarrée.');
   } else {
     state.recording_active = true;
     // A pause can last a while; resetting the reference point avoids the
@@ -382,12 +388,23 @@ function teardownCourseSubscription() {
   }
 }
 
+// Reorders state.pilotes to match the PC's rotation strategy (roster is
+// published in stint order), creating any pilot the mobile doesn't know
+// about yet. Pilots the mobile knows locally but that aren't in the PC
+// roster (e.g. deactivated on PC, or added only on the phone) are kept,
+// appended after — never silently dropped.
 function mergePcRoster(names) {
+  const byName = new Map(state.pilotes.map((p) => [p.nom, p]));
+  const ordered = [];
   names.forEach((nom) => {
     if (typeof nom !== 'string' || !nom.trim()) return;
-    const exists = state.pilotes.some((p) => p.nom === nom);
-    if (!exists) state.pilotes.push({ id: generateId(), nom });
+    let pilote = byName.get(nom);
+    if (!pilote) pilote = { id: generateId(), nom };
+    ordered.push(pilote);
+    byName.delete(nom);
   });
+  byName.forEach((pilote) => ordered.push(pilote));
+  state.pilotes = ordered;
 }
 
 function adoptPcPiloteIfNone(nom) {
@@ -528,7 +545,9 @@ function retryUnackedAlarms() {
 // ---- Rendering ----
 
 function render() {
-  const sessionTime = formatDuration(now() - state.session_start_ts);
+  const sessionTime = state.session_start_ts === null
+    ? '0:00'
+    : formatDuration(now() - state.session_start_ts);
   el.timerSession.textContent = sessionTime;
   el.chronoSessionTime.textContent = sessionTime;
 
@@ -540,10 +559,15 @@ function render() {
   el.tourPausedTag.classList.toggle('hidden', state.recording_active);
   el.tourBtnHint.textContent = state.recording_active
     ? 'Appuie à chaque passage sur la ligne'
-    : 'Enregistrement en pause';
+    : state.session_start_ts === null
+      ? 'Appuie sur Démarrer pour commencer'
+      : 'Enregistrement en pause';
 
   if (state.recording_active) {
     el.recordingToggleBtn.textContent = 'STOP enregistrement';
+    el.recordingToggleBtn.classList.remove('paused');
+  } else if (state.session_start_ts === null) {
+    el.recordingToggleBtn.textContent = 'DÉMARRER';
     el.recordingToggleBtn.classList.remove('paused');
   } else {
     el.recordingToggleBtn.textContent = 'REPRENDRE enregistrement';
