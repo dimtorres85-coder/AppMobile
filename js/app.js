@@ -237,9 +237,13 @@ function handleTourPress() {
 }
 
 function undoLastLap() {
-  if (state.laps.length === 0) return;
-  const removed = state.laps.pop();
-  state.synced_lap_ids = state.synced_lap_ids.filter((id) => id !== removed.id_unique);
+  const last = state.laps[state.laps.length - 1];
+  // Only undo a lap that belongs to the current stint — after a pilot
+  // change the Chrono page no longer shows the outgoing pilot's laps, so
+  // there's nothing on screen to associate this action with.
+  if (!last || last.id_relais_estime !== state.relais_estime_courant) return;
+  state.laps.pop();
+  state.synced_lap_ids = state.synced_lap_ids.filter((id) => id !== last.id_unique);
   state.last_lap_ts = state.laps.length
     ? state.laps[state.laps.length - 1].timestamp
     : null;
@@ -782,8 +786,12 @@ function render() {
   el.recordingToggleBtn.disabled = state.ejected || !started || !state.recording_active;
   el.recordingToggleBtn.textContent = 'STOP';
 
-  el.undoBtn.disabled = state.laps.length === 0;
-  el.lapsCount.textContent = state.laps.length;
+  // Derniers tours is scoped to the current stint: a pilot change starts a
+  // new relais_estime_courant, so the outgoing pilot's laps drop off the
+  // Chrono page (still fully available in Historique).
+  const currentRelaisLaps = state.laps.filter((l) => l.id_relais_estime === state.relais_estime_courant);
+  el.undoBtn.disabled = currentRelaisLaps.length === 0;
+  el.lapsCount.textContent = currentRelaisLaps.length;
 
   const toursRestants = state.relais_snapshot && typeof state.relais_snapshot.tours_restants === 'number'
     ? state.relais_snapshot.tours_restants
@@ -855,16 +863,18 @@ function buildLapRow(lap, index) {
 
 function renderLapsList() {
   el.lapsList.innerHTML = '';
-  const laps = state.laps.slice().reverse().slice(0, 20);
+  // Only the current stint's laps — a pilot change clears this list (the
+  // full history stays available under Historique).
+  const laps = state.laps.filter((l) => l.id_relais_estime === state.relais_estime_courant);
   if (laps.length === 0) {
     const empty = document.createElement('li');
     empty.className = 'laps-empty';
-    empty.textContent = 'Aucun tour enregistré pour l’instant.';
+    empty.textContent = 'Aucun tour enregistré pour ce relais.';
     el.lapsList.appendChild(empty);
     return;
   }
-  laps.forEach((lap) => {
-    el.lapsList.appendChild(buildLapRow(lap, state.laps.indexOf(lap) + 1));
+  laps.slice().reverse().forEach((lap, i) => {
+    el.lapsList.appendChild(buildLapRow(lap, laps.length - i));
   });
 }
 

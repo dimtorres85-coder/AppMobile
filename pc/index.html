@@ -63,6 +63,18 @@
   .btn-green{ border:none; background:var(--green); color:#0c1c0d; font-weight:800; }
   .btn-green:hover{ filter:brightness(1.08); }
 
+  .alert-btn{ position:relative; overflow:hidden; cursor:pointer; border-radius:22px; border:2px solid #ffb066;
+    background:linear-gradient(180deg,#ff7a3c 0%,#ff4d12 55%,#d43600 100%);
+    box-shadow:0 12px 34px -10px rgba(255,80,10,.7), inset 0 2px 2px rgba(255,255,255,.35);
+    display:flex; align-items:center; justify-content:center; }
+  .alert-btn:hover{ box-shadow:0 14px 40px -8px rgba(255,80,10,.85), inset 0 2px 2px rgba(255,255,255,.4); }
+  .alert-btn__flag{ font-size:78px; line-height:1; transition:opacity .18s ease, transform .18s ease; }
+  .alert-btn:hover .alert-btn__flag{ opacity:0; transform:scale(.65) rotate(-8deg); }
+  .alert-btn__label{ position:absolute; inset:10px; display:flex; align-items:center; justify-content:center; text-align:center;
+    color:#fff; font-weight:900; font-size:24px; line-height:1.22; letter-spacing:.2px;
+    opacity:0; transform:scale(.9); transition:opacity .18s ease, transform .18s ease; }
+  .alert-btn:hover .alert-btn__label{ opacity:1; transform:scale(1); }
+
   input.field, select.field{ background:#0f0d08; border:2px solid var(--line); border-radius:14px;
     padding:14px 20px; font-family:var(--mono); font-size:34px; font-weight:700; color:var(--ink); width:100%; }
   input.field:focus{ border-color:var(--accent); }
@@ -793,11 +805,10 @@ const SCREENS = {
       <div style="position:absolute; top:34px; right:46px; display:flex; align-items:center; gap:12px; color:var(--muted); font-size:40px; z-index:4;" class="mono">
         <span style="width:9px;height:9px;border-radius:50%;background:var(--muted);"></span><span id="v-clock"></span></div>
       <button id="b-rentre-manual" title="Envoie au mobile le signal de faire rentrer le pilote, sans attendre l'alerte automatique de fin de relais"
-        style="position:absolute; top:96px; right:46px; z-index:4; height:104px; min-width:360px; padding:0 30px; border-radius:20px;
-        background:linear-gradient(180deg,#ff7a3c 0%,#ff4d12 55%,#d43600 100%); border:2px solid #ffb066;
-        box-shadow:0 12px 34px -10px rgba(255,80,10,.7), inset 0 2px 2px rgba(255,255,255,.35);
-        color:#fff; font-weight:900; font-size:32px; letter-spacing:.5px; cursor:pointer;
-        display:flex; align-items:center; justify-content:center; gap:16px;">🚩 FAIRE RENTRER LE PILOTE</button>
+        class="alert-btn" style="position:absolute; top:92px; right:46px; z-index:4; width:178px; height:178px;">
+        <span class="alert-btn__flag">🚩</span>
+        <span class="alert-btn__label">FAIRE<br>RENTRER<br>LE PILOTE</span>
+      </button>
       <div id="netdot" title="Synchro mobile" style="position:absolute; left:44px; top:82px; z-index:4; background:#181510cc; border:1px solid var(--line); border-radius:999px; padding:7px 16px; font-size:22px; color:var(--muted); cursor:pointer;">○ —</div>
       ${state.sessionCode?`<div style="position:absolute; left:44px; top:130px; z-index:4; background:#181510cc; border:1px solid var(--line); border-radius:14px; padding:10px;">${qrSVG(state.sessionCode,110)}</div>`:''}
       ${body}
