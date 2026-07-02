@@ -303,7 +303,7 @@ function onAlarmReceived(key,val){ if(!val) return; const id=val.id_unique||key;
   const ts=(val&&val.timestamp)||now(); if(ts < SYNC.connectTs-5000) return;   // ne pas rejouer l'historique au (re)branchement
   state.alarmTel={ id, ts }; state.alertReturn=['live','laps','stats','settings','driver'].includes(state.phase)?state.phase:'live';
   beepAlarm(); go('alarmTel'); }
-function beepAlarm(){ beep(720,.16,'sawtooth',0); beep(500,.16,'sawtooth',.18); beep(720,.16,'sawtooth',.36); beep(500,.22,'sawtooth',.54); }
+function beepAlarm(){ playPreset(state.cfg.sounds.alarm); }
 function placeInboxLap(item){ const seg=state.relais[state.selSeg]; if(seg){ snapshot(); seg.laps.push(item.val); }
   state.inbox=state.inbox.filter(x=>x.id!==item.id); save(); render(); toast('Chrono placé dans le relais nº '+(state.selSeg+1)); }
 function ignoreInboxLap(item){ state.inbox=state.inbox.filter(x=>x.id!==item.id); save(); render(); }
@@ -328,6 +328,7 @@ const DEFAULT = () => ({
       { name:'', max:40*60, best:'', avg:'', active:true },
     ],
     alerts: { fuel:true, relaisMode:'time', relaisTime:5*60, relaisLaps:3, finish:true },
+    sounds: { relais:'strident', finish:'doux', fuel:'feutre', alarm:'sirene' },
   },
   variant: 'A',
   race: { startedAt:null, pausedMs:0 },
@@ -360,6 +361,7 @@ function load(){
 }
 function migrate(s){ const d=DEFAULT(); // compléter les clés manquantes (anciennes sauvegardes Phase 1)
   s.cfg = Object.assign({}, d.cfg, s.cfg); s.cfg.alerts = Object.assign({}, d.cfg.alerts, s.cfg.alerts);
+  s.cfg.sounds = Object.assign({}, d.cfg.sounds, s.cfg.sounds);
   s.race = Object.assign({}, d.race, s.race); s.pause = s.pause||d.pause; s.ack = Object.assign({}, d.ack, s.ack);
   if(s.incident===undefined) s.incident=null; if(s.driverReturn===undefined) s.driverReturn='live';
   if(s.confirm===undefined) s.confirm=null; if(s.abandonStep===undefined) s.abandonStep=0; if(s.abandonPos===undefined) s.abandonPos=null;
@@ -462,9 +464,23 @@ function beep(freq,dur,type,when){ const c=audio(); if(!c)return; const t=c.curr
   const o=c.createOscillator(),g=c.createGain(); o.type=type||'square'; o.frequency.value=freq;
   o.connect(g); g.connect(c.destination); g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.18,t+.01);
   g.gain.exponentialRampToValueAtTime(.0001,t+dur); o.start(t); o.stop(t+dur+.02); }
-function beepRelais(){ [0,.32,.64].forEach(d=>beep(920,.22,'square',d)); }       // strident, urgent
-function beepFinish(){ beep(523,.22,'sine',0); beep(659,.22,'sine',.24); beep(784,.5,'sine',.48); } // festif
-function beepFuel(){ beep(440,.18,'triangle',0); beep(440,.18,'triangle',.24); }
+// Presets de sons nommés, vocabulaire partagé avec l'appli mobile (mêmes
+// formes d'onde, mêmes rythmes) pour qu'un preset choisi d'un côté « sonne
+// pareil » de l'autre.
+const SOUND_PRESET_LABELS = { strident:'Strident (bips carrés)', sirene:'Sirène (dents de scie)', doux:'Doux (notes montantes)', feutre:'Feutré (double bip)', simple:'Simple (bip unique)' };
+const SOUND_PRESETS = {
+  strident:[[920,.22,'square',0],[920,.22,'square',.32],[920,.22,'square',.64]],
+  sirene:[[720,.16,'sawtooth',0],[500,.16,'sawtooth',.18],[720,.16,'sawtooth',.36],[500,.22,'sawtooth',.54]],
+  doux:[[523,.22,'sine',0],[659,.22,'sine',.24],[784,.5,'sine',.48]],
+  feutre:[[440,.18,'triangle',0],[440,.18,'triangle',.24]],
+  simple:[[520,.22,'square',0]],
+};
+function playPreset(key){ (SOUND_PRESETS[key]||SOUND_PRESETS.strident).forEach(([f,d,t,w])=>beep(f,d,t,w)); }
+function soundOptionsHTML(selected){ return Object.keys(SOUND_PRESET_LABELS).map(k=>
+  `<option value="${k}" ${selected===k?'selected':''}>${SOUND_PRESET_LABELS[k]}</option>`).join(''); }
+function beepRelais(){ playPreset(state.cfg.sounds.relais); }       // strident, urgent
+function beepFinish(){ playPreset(state.cfg.sounds.finish); } // festif
+function beepFuel(){ playPreset(state.cfg.sounds.fuel); }
 
 // ───────────────────────── transitions / actions ─────────────────────────
 function go(phase){ state.phase = phase; save(); render(); }
@@ -1190,6 +1206,17 @@ const SCREENS = {
             <input class="field mono" id="se-relval"
               value="${state.cfg.alerts.relaisMode==='time'?Math.round(state.cfg.alerts.relaisTime/60):state.cfg.alerts.relaisLaps}"
               style="width:110px; text-align:center; font-size:30px;"></div></div>
+        <div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:14px;">
+          <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Sons des alertes</div>
+          ${[['relais','Fin de relais (faire rentrer)'],['finish','Fin de course'],['fuel','Alerte plein'],['alarm','Appel du bord de piste']].map(([k,label])=>`
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:14px;">
+            <span style="font-size:22px;">${label}</span>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <select class="field" id="se-sound-${k}" data-sound-key="${k}" style="font-size:20px; padding:8px 12px; width:auto;">
+                ${soundOptionsHTML(state.cfg.sounds[k])}</select>
+              <button class="btn" data-sound-test="${k}" style="height:48px; width:48px; padding:0; font-size:20px; border-radius:12px;">🔊</button>
+            </div></div>`).join('')}
+        </div>
         <div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:12px;">
           <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Stratégie de relais — ordre &amp; pilotes actifs</div>
           ${strategyRows()}
@@ -1315,6 +1342,10 @@ function wire(){
     const fm=$('#se-fuelmin'); if(fm) fm.addEventListener('change',()=>{ state.cfg.fuelSec=(Number(fm.value)||0)*60; state.ack.fuel=false; save(); toast('Plein mis à jour'); });
     const rm=$('#se-relmode'); if(rm) rm.addEventListener('change',()=>{ state.cfg.alerts.relaisMode=rm.value; state.ack.relais=false; save(); render(); toast('Mode d’alerte fin de relais : '+(rm.value==='laps'?'nb de tours':'temps')); });
     const rv=$('#se-relval'); if(rv) rv.addEventListener('change',()=>{ const v=Number(rv.value)||0; if(state.cfg.alerts.relaisMode==='time') state.cfg.alerts.relaisTime=v*60; else state.cfg.alerts.relaisLaps=v; state.ack.relais=false; save(); toast('Seuil d’alerte fin de relais mis à jour'); });
+    document.querySelectorAll('[data-sound-key]').forEach(sel=>sel.addEventListener('change',()=>{
+      const k=sel.dataset.soundKey; state.cfg.sounds[k]=sel.value; save(); playPreset(sel.value); toast('Son mis à jour'); }));
+    document.querySelectorAll('[data-sound-test]').forEach(btn=>btn.addEventListener('click',()=>{
+      playPreset(state.cfg.sounds[btn.dataset.soundTest]); }));
     // synchro mobile
     const ns=$('#netstat'); if(ns){ const s=netState(); ns.innerHTML='<span style="color:'+s.c+'">'+s.d+'</span> '+s.t; }
     const applyVer=()=>{ const v=$('#fb-ver'); if(v&&v.value.trim()){ FB_VER=v.value.trim(); localStorage.setItem('endu.fbver',FB_VER); } };

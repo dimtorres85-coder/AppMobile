@@ -59,6 +59,9 @@ export function createDefaultState() {
 
     // Display preference (device-local, not synced).
     nav_position: 'left',
+    // Sound preset per alert type (device-local, not synced — each phone
+    // picks whatever cuts through its own trackside noise best).
+    sound_prefs: { rentre: 'strident', finish: 'doux', alarm_ack: 'simple' },
   };
 }
 
@@ -69,6 +72,7 @@ function withDefaults(parsed) {
   const base = createDefaultState();
   const merged = { ...base, ...parsed };
   merged.session_local_id = parsed.session_local_id || base.session_local_id;
+  merged.sound_prefs = { ...base.sound_prefs, ...(parsed.sound_prefs || {}) };
   return merged;
 }
 

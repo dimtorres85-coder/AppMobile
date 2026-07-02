@@ -420,6 +420,35 @@ textarea.field { resize: none; }
 }
 .nav-position-btn.current { background: var(--amber-bg); border-color: var(--amber-border); color: var(--gold); }
 
+.sound-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-2);
+}
+.sound-row:first-of-type { border-top: none; padding-top: 0; }
+.sound-row__label { font-size: 13px; color: var(--text-soft); }
+.sound-row__controls { display: flex; align-items: center; gap: 8px; }
+.sound-row__select {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 8px;
+  font-size: 13px;
+}
+.sound-row__test {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--border-4);
+  background: var(--card-strong);
+  color: var(--gold);
+  font-size: 16px;
+  cursor: pointer;
+}
+.sound-row__test:active { transform: scale(.94); }
+
 /* ===== Page: Chrono ===== */
 /* This whole page is a flex column so the laps list is the only part that
    scrolls internally — everything else (pilot, chrono, TOUR, controls)

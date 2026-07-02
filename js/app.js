@@ -1,7 +1,7 @@
 import { now } from './now.js';
 import { generateId, loadState, saveState, createDefaultState } from './storage.js';
 import * as transport from './transport.js';
-import { beep, vibrate } from './signals.js';
+import { vibrate, playPreset } from './signals.js';
 
 let state = loadState();
 let currentPage = 'accueil';
@@ -126,6 +126,13 @@ const el = {
   appFrame: document.getElementById('app-frame'),
   navPosLeftBtn: document.getElementById('nav-pos-left-btn'),
   navPosRightBtn: document.getElementById('nav-pos-right-btn'),
+
+  soundRentre: document.getElementById('sound-rentre'),
+  soundRentreTest: document.getElementById('sound-rentre-test'),
+  soundFinish: document.getElementById('sound-finish'),
+  soundFinishTest: document.getElementById('sound-finish-test'),
+  soundAlarmAck: document.getElementById('sound-alarm-ack'),
+  soundAlarmAckTest: document.getElementById('sound-alarm-ack-test'),
 };
 
 function persist() {
@@ -723,7 +730,7 @@ function listenAlarmAckIfNeeded(alarm) {
       found.ack_ts = ackVal.timestamp || now();
       persist();
       render();
-      beep({ frequency: 520, times: 1 });
+      playPreset(state.sound_prefs.alarm_ack);
     }
   });
   alarmAckUnsubscribes.set(alarm.id_unique, unsub);
@@ -826,6 +833,10 @@ function render() {
   el.appFrame.classList.toggle('nav-right', state.nav_position === 'right');
   el.navPosLeftBtn.classList.toggle('current', state.nav_position !== 'right');
   el.navPosRightBtn.classList.toggle('current', state.nav_position === 'right');
+
+  el.soundRentre.value = state.sound_prefs.rentre;
+  el.soundFinish.value = state.sound_prefs.finish;
+  el.soundAlarmAck.value = state.sound_prefs.alarm_ack;
 }
 
 function renderPending() {
@@ -1129,7 +1140,7 @@ function maybeSignalRentre() {
   if (r.ts !== lastFlashedRentreTs) {
     lastFlashedRentreTs = r.ts;
     el.rentreOverlay.classList.remove('hidden');
-    beep({ frequency: 660, times: 3 });
+    playPreset(state.sound_prefs.rentre);
     vibrate([200, 100, 200, 100, 400]);
   }
 }
@@ -1159,9 +1170,7 @@ function maybeSignalRaceOver() {
   el.finishOverlay.classList.remove('hidden');
   if (!raceOverSignaled) {
     raceOverSignaled = true;
-    beep({ frequency: 660, duration: 150, times: 1 });
-    setTimeout(() => beep({ frequency: 880, duration: 150, times: 1 }), 180);
-    setTimeout(() => beep({ frequency: 1100, duration: 300, times: 1 }), 360);
+    playPreset(state.sound_prefs.finish);
     vibrate([150, 80, 150, 80, 300]);
   }
 }
@@ -1267,6 +1276,25 @@ el.navPosRightBtn.addEventListener('click', () => {
   persist();
   render();
 });
+
+el.soundRentre.addEventListener('change', () => {
+  state.sound_prefs.rentre = el.soundRentre.value;
+  persist();
+  playPreset(state.sound_prefs.rentre);
+});
+el.soundRentreTest.addEventListener('click', () => playPreset(state.sound_prefs.rentre));
+el.soundFinish.addEventListener('change', () => {
+  state.sound_prefs.finish = el.soundFinish.value;
+  persist();
+  playPreset(state.sound_prefs.finish);
+});
+el.soundFinishTest.addEventListener('click', () => playPreset(state.sound_prefs.finish));
+el.soundAlarmAck.addEventListener('change', () => {
+  state.sound_prefs.alarm_ack = el.soundAlarmAck.value;
+  persist();
+  playPreset(state.sound_prefs.alarm_ack);
+});
+el.soundAlarmAckTest.addEventListener('click', () => playPreset(state.sound_prefs.alarm_ack));
 
 el.tourBtn.addEventListener('click', handleTourPress);
 el.undoBtn.addEventListener('click', undoLastLap);

@@ -115,6 +115,49 @@
       </div>
 
       <div class="card">
+        <div class="card-label" style="margin-bottom:10px">Sons des alertes</div>
+        <div class="sound-row">
+          <span class="sound-row__label">Faire rentrer le pilote</span>
+          <div class="sound-row__controls">
+            <select id="sound-rentre" class="field sound-row__select">
+              <option value="strident">Strident (bips carrés)</option>
+              <option value="sirene">Sirène (dents de scie)</option>
+              <option value="doux">Doux (notes montantes)</option>
+              <option value="feutre">Feutré (double bip)</option>
+              <option value="simple">Simple (bip unique)</option>
+            </select>
+            <button id="sound-rentre-test" type="button" class="sound-row__test">🔊</button>
+          </div>
+        </div>
+        <div class="sound-row">
+          <span class="sound-row__label">Fin de course</span>
+          <div class="sound-row__controls">
+            <select id="sound-finish" class="field sound-row__select">
+              <option value="strident">Strident (bips carrés)</option>
+              <option value="sirene">Sirène (dents de scie)</option>
+              <option value="doux">Doux (notes montantes)</option>
+              <option value="feutre">Feutré (double bip)</option>
+              <option value="simple">Simple (bip unique)</option>
+            </select>
+            <button id="sound-finish-test" type="button" class="sound-row__test">🔊</button>
+          </div>
+        </div>
+        <div class="sound-row">
+          <span class="sound-row__label">Confirmation d'alerte (PC prévenu)</span>
+          <div class="sound-row__controls">
+            <select id="sound-alarm-ack" class="field sound-row__select">
+              <option value="strident">Strident (bips carrés)</option>
+              <option value="sirene">Sirène (dents de scie)</option>
+              <option value="doux">Doux (notes montantes)</option>
+              <option value="feutre">Feutré (double bip)</option>
+              <option value="simple">Simple (bip unique)</option>
+            </select>
+            <button id="sound-alarm-ack-test" type="button" class="sound-row__test">🔊</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
         <div class="card-label">Paramètres de connexion</div>
         <p class="card-desc">Colle la config technique fournie par le stand.</p>
         <textarea id="settings-config-input" class="field settings-textarea" placeholder='{ "databaseURL": "https://xxx.firebaseio.com", ... }'></textarea>
