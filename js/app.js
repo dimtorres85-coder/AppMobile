@@ -38,6 +38,7 @@ const el = {
   syncPiloteBtn: document.getElementById('sync-pilote-btn'),
 
   tourBtn: document.getElementById('tour-btn'),
+  tourBtnLabel: document.getElementById('tour-btn-label'),
   tourPausedTag: document.getElementById('tour-paused-tag'),
   tourBtnHint: document.getElementById('tour-btn-hint'),
   lastLapValue: document.getElementById('last-lap-value'),
@@ -183,6 +184,26 @@ function recordLap() {
   flushLapQueue();
 }
 
+function startSession() {
+  state.session_start_ts = now();
+  state.recording_active = true;
+  state.last_lap_ts = null;
+  persist();
+  render();
+  showToast('Session démarrée.');
+}
+
+// The big round button doubles as Start (before the session exists) and
+// Lap (once running) — like a real stopwatch's start/split button.
+function handleTourPress() {
+  if (state.ejected) return;
+  if (state.session_start_ts === null) {
+    startSession();
+    return;
+  }
+  recordLap();
+}
+
 function undoLastLap() {
   if (state.laps.length === 0) return;
   const removed = state.laps.pop();
@@ -195,20 +216,17 @@ function undoLastLap() {
   showToast('Dernier tour annulé.');
 }
 
+// Pause/resume only — starting the session lives on the TOUR button now
+// (handleTourPress), so this button always has a single, unambiguous job.
 function toggleRecording() {
   if (state.ejected) {
     showToast('Reprends la main avant de modifier l’enregistrement.');
     return;
   }
+  if (state.session_start_ts === null) return; // nothing to stop/resume yet
   if (state.recording_active) {
     state.recording_active = false;
     showToast('Enregistrement en pause.');
-  } else if (state.session_start_ts === null) {
-    // First start: nothing runs until the user explicitly taps Démarrer.
-    state.session_start_ts = now();
-    state.recording_active = true;
-    state.last_lap_ts = null;
-    showToast('Session démarrée.');
   } else {
     state.recording_active = true;
     // A pause can last a while; resetting the reference point avoids the
@@ -490,24 +508,36 @@ function adoptPcPiloteIfNone(nom) {
   if (pilote) state.pilote_courant_id = pilote.id;
 }
 
-// Manual recovery from a bad manip on the phone: re-adopt the PC's current
-// pilot even though a local selection already exists (adoptPcPiloteIfNone
-// above only ever does this once, automatically, when nothing is selected).
+// Adopts the PC's current pilot without touching last_lap_ts: this is the
+// PC correcting who's marked as current, not a stint change happening on
+// the phone right now, so the running "chrono en cours" must keep ticking
+// exactly as it was. Returns true if it actually changed anything.
+function syncPiloteWithPc(nom) {
+  const pilote = state.pilotes.find((p) => p.nom === nom);
+  if (!pilote || pilote.id === state.pilote_courant_id) return false;
+  state.pilote_courant_id = pilote.id;
+  state.relais_estime_courant += 1;
+  return true;
+}
+
+// Manual recovery from a bad manip on the phone — same sync as the
+// automatic one in onPcState below, just triggered on demand.
 function syncPiloteFromPc() {
   if (!state.pc_pilote_courant) {
     showToast('Aucune info pilote reçue du PC pour l’instant.');
     return;
   }
-  const pilote = state.pilotes.find((p) => p.nom === state.pc_pilote_courant);
-  if (!pilote) {
+  if (!state.pilotes.some((p) => p.nom === state.pc_pilote_courant)) {
     showToast('Pilote PC inconnu localement : ' + state.pc_pilote_courant);
     return;
   }
-  if (pilote.id === state.pilote_courant_id) {
+  if (!syncPiloteWithPc(state.pc_pilote_courant)) {
     showToast('Déjà synchronisé avec le PC.');
     return;
   }
-  selectPilote(pilote.id);
+  persist();
+  render();
+  showToast('Pilote synchronisé : ' + state.pc_pilote_courant);
 }
 
 function onPcState(raw) {
@@ -517,7 +547,10 @@ function onPcState(raw) {
     state.pc_roster = raw.roster;
   }
   state.pc_pilote_courant = typeof raw.pilote_courant === 'string' ? raw.pilote_courant : null;
-  if (state.pc_pilote_courant) adoptPcPiloteIfNone(state.pc_pilote_courant);
+  if (state.pc_pilote_courant) {
+    if (state.pilote_courant_id) syncPiloteWithPc(state.pc_pilote_courant);
+    else adoptPcPiloteIfNone(state.pc_pilote_courant);
+  }
   state.relais_snapshot = raw.relais || null;
   state.course_snapshot = raw.course || null;
   state.pause = !!raw.pause;
@@ -657,28 +690,34 @@ function render() {
     ? formatDuration(now() - lapRef, { tenths: true })
     : '—';
 
-  const canRecord = state.recording_active && !state.ejected;
-  el.tourBtn.disabled = !canRecord;
-  el.tourBtn.classList.toggle('paused', !canRecord);
+  // The round button is Start before a session exists, then Lap once
+  // running — a real stopwatch's start/split button. It's only disabled
+  // while genuinely paused (already started) or ejected; "not started yet"
+  // is a normal, tappable state (that's how you start it).
+  const started = state.session_start_ts !== null;
+  const canPress = !state.ejected && (!started || state.recording_active);
+  el.tourBtn.disabled = !canPress;
+  el.tourBtn.classList.toggle('paused', !canPress);
+  el.tourBtnLabel.textContent = started ? 'TOUR' : 'DÉMARRER';
+  el.tourBtnLabel.classList.toggle('tour-btn__label--start', !started);
   el.tourPausedTag.textContent = state.ejected ? 'Déconnecté' : 'En pause';
-  el.tourPausedTag.classList.toggle('hidden', canRecord);
+  el.tourPausedTag.classList.toggle('hidden', canPress);
   el.tourBtnHint.textContent = state.ejected
     ? 'Déconnecté — un autre téléphone a pris le relais'
-    : state.recording_active
-      ? 'Appuie à chaque passage sur la ligne'
-      : state.session_start_ts === null
-        ? 'Appuie sur Démarrer pour commencer'
+    : !started
+      ? 'Appuie pour démarrer le chrono'
+      : state.recording_active
+        ? 'Appuie à chaque passage sur la ligne'
         : 'Enregistrement en pause';
 
-  el.recordingToggleBtn.disabled = state.ejected;
-  if (state.recording_active) {
-    el.recordingToggleBtn.textContent = 'STOP enregistrement';
-    el.recordingToggleBtn.classList.remove('paused');
-  } else if (state.session_start_ts === null) {
-    el.recordingToggleBtn.textContent = 'DÉMARRER';
+  // STOP/REPRENDRE now has a single job: pause/resume an already-running
+  // session. Nothing to do before the session has started.
+  el.recordingToggleBtn.disabled = state.ejected || !started;
+  if (!started || state.recording_active) {
+    el.recordingToggleBtn.textContent = 'STOP';
     el.recordingToggleBtn.classList.remove('paused');
   } else {
-    el.recordingToggleBtn.textContent = 'REPRENDRE enregistrement';
+    el.recordingToggleBtn.textContent = 'REPRENDRE';
     el.recordingToggleBtn.classList.add('paused');
   }
 
@@ -1006,7 +1045,7 @@ for (const btn of el.navRail.querySelectorAll('.nav-item')) {
   btn.addEventListener('click', () => goToPage(btn.dataset.page));
 }
 
-el.tourBtn.addEventListener('click', recordLap);
+el.tourBtn.addEventListener('click', handleTourPress);
 el.undoBtn.addEventListener('click', undoLastLap);
 el.recordingToggleBtn.addEventListener('click', toggleRecording);
 el.chronoPilotBtn.addEventListener('click', () => {
