@@ -303,7 +303,7 @@ function onAlarmReceived(key,val){ if(!val) return; const id=val.id_unique||key;
   const ts=(val&&val.timestamp)||now(); if(ts < SYNC.connectTs-5000) return;   // ne pas rejouer l'historique au (re)branchement
   state.alarmTel={ id, ts }; state.alertReturn=['live','laps','stats','settings','driver'].includes(state.phase)?state.phase:'live';
   beepAlarm(); go('alarmTel'); }
-function beepAlarm(){ playPreset(state.cfg.sounds.alarm); }
+function beepAlarm(){ playAlertSound('alarm'); }
 function placeInboxLap(item){ const seg=state.relais[state.selSeg]; if(seg){ snapshot(); seg.laps.push(item.val); }
   state.inbox=state.inbox.filter(x=>x.id!==item.id); save(); render(); toast('Chrono placé dans le relais nº '+(state.selSeg+1)); }
 function ignoreInboxLap(item){ state.inbox=state.inbox.filter(x=>x.id!==item.id); save(); render(); }
@@ -475,12 +475,28 @@ const SOUND_PRESETS = {
   feutre:[[440,.18,'triangle',0],[440,.18,'triangle',.24]],
   simple:[[520,.22,'square',0]],
 };
-function playPreset(key){ (SOUND_PRESETS[key]||SOUND_PRESETS.strident).forEach(([f,d,t,w])=>beep(f,d,t,w)); }
+function playPresetByName(key){ (SOUND_PRESETS[key]||SOUND_PRESETS.strident).forEach(([f,d,t,w])=>beep(f,d,t,w)); }
 function soundOptionsHTML(selected){ return Object.keys(SOUND_PRESET_LABELS).map(k=>
   `<option value="${k}" ${selected===k?'selected':''}>${SOUND_PRESET_LABELS[k]}</option>`).join(''); }
-function beepRelais(){ playPreset(state.cfg.sounds.relais); }       // strident, urgent
-function beepFinish(){ playPreset(state.cfg.sounds.finish); } // festif
-function beepFuel(){ playPreset(state.cfg.sounds.fuel); }
+
+// Fichiers audio perso (.mp3 etc), un par type d'alerte : stockés à part de
+// `state` (clés localStorage dédiées) pour ne jamais alourdir les save()
+// fréquents du state principal avec des data URL potentiellement lourdes.
+const CUSTOM_SOUND_KEYS = { relais:'endu.sound.relais', finish:'endu.sound.finish', fuel:'endu.sound.fuel', alarm:'endu.sound.alarm' };
+const customSounds = {};
+Object.keys(CUSTOM_SOUND_KEYS).forEach(k=>{ try{ customSounds[k]=localStorage.getItem(CUSTOM_SOUND_KEYS[k]); }catch(e){ customSounds[k]=null; } });
+function setCustomSound(key,dataUrl){
+  try{ localStorage.setItem(CUSTOM_SOUND_KEYS[key],dataUrl); customSounds[key]=dataUrl; }
+  catch(e){ customSounds[key]=null; toast('⚠ Fichier trop volumineux pour être sauvegardé dans le navigateur'); }
+}
+function clearCustomSound(key){ customSounds[key]=null; try{ localStorage.removeItem(CUSTOM_SOUND_KEYS[key]); }catch(e){} }
+function playAlertSound(key){
+  if(customSounds[key]){ try{ new Audio(customSounds[key]).play().catch(()=>{}); return; }catch(e){} }
+  playPresetByName(state.cfg.sounds[key]);
+}
+function beepRelais(){ playAlertSound('relais'); }       // strident, urgent
+function beepFinish(){ playAlertSound('finish'); } // festif
+function beepFuel(){ playAlertSound('fuel'); }
 
 // ───────────────────────── transitions / actions ─────────────────────────
 function go(phase){ state.phase = phase; save(); render(); }
@@ -1208,13 +1224,20 @@ const SCREENS = {
               style="width:110px; text-align:center; font-size:30px;"></div></div>
         <div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:14px;">
           <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Sons des alertes</div>
+          <div class="muted" style="font-size:16px; margin-top:-6px;">Un fichier audio perso (mp3…) remplace le preset intégré pour cette alerte.</div>
           ${[['relais','Fin de relais (faire rentrer)'],['finish','Fin de course'],['fuel','Alerte plein'],['alarm','Appel du bord de piste']].map(([k,label])=>`
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:14px;">
-            <span style="font-size:22px;">${label}</span>
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;">
+            <div>
+              <div style="font-size:22px;">${label}</div>
+              ${customSounds[k]?'<div style="font-size:15px;color:var(--green);">🎵 fichier perso actif</div>':''}
+            </div>
             <div style="display:flex; align-items:center; gap:10px;">
               <select class="field" id="se-sound-${k}" data-sound-key="${k}" style="font-size:20px; padding:8px 12px; width:auto;">
                 ${soundOptionsHTML(state.cfg.sounds[k])}</select>
-              <button class="btn" data-sound-test="${k}" style="height:48px; width:48px; padding:0; font-size:20px; border-radius:12px;">🔊</button>
+              <button class="btn" data-sound-test="${k}" title="Écouter" style="height:48px; width:48px; padding:0; font-size:20px; border-radius:12px;">🔊</button>
+              <label class="btn" title="Choisir un fichier audio" style="height:48px; width:48px; padding:0; font-size:20px; border-radius:12px; display:flex; align-items:center; justify-content:center; cursor:pointer;">📁
+                <input type="file" accept="audio/*" data-sound-file="${k}" style="display:none;"></label>
+              ${customSounds[k]?`<button class="btn" data-sound-clear="${k}" title="Retirer le fichier perso" style="height:48px; width:48px; padding:0; font-size:20px; border-radius:12px;">✕</button>`:''}
             </div></div>`).join('')}
         </div>
         <div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:12px;">
@@ -1343,9 +1366,19 @@ function wire(){
     const rm=$('#se-relmode'); if(rm) rm.addEventListener('change',()=>{ state.cfg.alerts.relaisMode=rm.value; state.ack.relais=false; save(); render(); toast('Mode d’alerte fin de relais : '+(rm.value==='laps'?'nb de tours':'temps')); });
     const rv=$('#se-relval'); if(rv) rv.addEventListener('change',()=>{ const v=Number(rv.value)||0; if(state.cfg.alerts.relaisMode==='time') state.cfg.alerts.relaisTime=v*60; else state.cfg.alerts.relaisLaps=v; state.ack.relais=false; save(); toast('Seuil d’alerte fin de relais mis à jour'); });
     document.querySelectorAll('[data-sound-key]').forEach(sel=>sel.addEventListener('change',()=>{
-      const k=sel.dataset.soundKey; state.cfg.sounds[k]=sel.value; save(); playPreset(sel.value); toast('Son mis à jour'); }));
+      const k=sel.dataset.soundKey; state.cfg.sounds[k]=sel.value; save(); playPresetByName(sel.value); toast('Son mis à jour'); }));
     document.querySelectorAll('[data-sound-test]').forEach(btn=>btn.addEventListener('click',()=>{
-      playPreset(state.cfg.sounds[btn.dataset.soundTest]); }));
+      playAlertSound(btn.dataset.soundTest); }));
+    document.querySelectorAll('[data-sound-file]').forEach(inp=>inp.addEventListener('change',()=>{
+      const k=inp.dataset.soundFile; const file=inp.files&&inp.files[0]; if(!file) return;
+      if(file.size>3*1024*1024) toast('⚠ Fichier volumineux : le navigateur pourrait refuser de le sauvegarder');
+      const reader=new FileReader();
+      reader.onload=()=>{ setCustomSound(k,reader.result); render(); toast('🎵 Fichier audio associé'); };
+      reader.onerror=()=>toast('⚠ Lecture du fichier impossible');
+      reader.readAsDataURL(file);
+    }));
+    document.querySelectorAll('[data-sound-clear]').forEach(btn=>btn.addEventListener('click',()=>{
+      clearCustomSound(btn.dataset.soundClear); render(); toast('Fichier audio retiré, retour au son intégré'); }));
     // synchro mobile
     const ns=$('#netstat'); if(ns){ const s=netState(); ns.innerHTML='<span style="color:'+s.c+'">'+s.d+'</span> '+s.t; }
     const applyVer=()=>{ const v=$('#fb-ver'); if(v&&v.value.trim()){ FB_VER=v.value.trim(); localStorage.setItem('endu.fbver',FB_VER); } };
