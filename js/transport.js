@@ -102,7 +102,11 @@ export async function pushLap(idCourse, lap) {
   if (!idCourse) throw new Error('Pas de course appairée.');
   const db = await ensureConnected();
   if (!db) throw new Error('Relais indisponible.');
-  await firebaseModules.set(firebaseModules.ref(db, `sessions/${idCourse}/laps/${lap.id_unique}`), lap);
+  // The app keeps valeur_chrono in ms internally (like every other timestamp
+  // here), but the PC contract expects a plain number in seconds — convert
+  // only on the wire, never in the locally stored/displayed lap.
+  const wireLap = { ...lap, valeur_chrono: lap.valeur_chrono / 1000 };
+  await firebaseModules.set(firebaseModules.ref(db, `sessions/${idCourse}/laps/${lap.id_unique}`), wireLap);
 }
 
 export async function pushAlarm(idCourse, alarm) {

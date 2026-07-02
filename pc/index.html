@@ -250,10 +250,10 @@ function fbBuildState(){ const cur=curRelais(); const t=now();
   const pilote=cur? drivers()[cur.driverIdx].name : (roster[0]||'');
   const mode=state.cfg.alerts.relaisMode==='laps'?'tours':'temps';
   let relais=null;
-  if(cur){ const max=drivers()[cur.driverIdx].max; let cible;
-    const tempsTarget=cur.startedAt+(max-state.cfg.alerts.relaisTime)*1000+(cur.pausedMs||0)+livePauseMs();
-    if(mode==='tours'){ const p=driverPace(cur.driverIdx); cible = p? (t+Math.max(0,(relaisRem()-state.cfg.alerts.relaisLaps*p))*1000) : tempsTarget; }
-    else cible=tempsTarget;
+  if(cur){ const max=drivers()[cur.driverIdx].max;
+    // cible_fin_ts = vraie fin de relais (comme l'affichage local v-relais), pas
+    // le moment où l'alerte RENTRE se déclenche (qui arrive plus tôt, séparément).
+    const cible=cur.startedAt+max*1000+(cur.pausedMs||0)+livePauseMs();
     relais={ debut_ts:Math.round(cur.startedAt), cible_fin_ts:Math.round(cible), mode_alerte:mode }; }
   const fin = state.race.startedAt!=null ? Math.round(state.race.startedAt+state.cfg.durationSec*1000+state.race.pausedMs+livePauseMs()) : null;
   return { pilote_courant:pilote, roster, relais, course: fin!=null?{fin_ts:fin}:null,

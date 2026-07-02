@@ -249,7 +249,9 @@ function resetSession() {
 function exportSession() {
   const lapsById = {};
   for (const lap of state.laps) {
-    lapsById[lap.id_unique] = lap;
+    // Mirrors the Firebase wire format (valeur_chrono in seconds) so USB
+    // import and the live relay parse laps the same way on the PC side.
+    lapsById[lap.id_unique] = { ...lap, valeur_chrono: lap.valeur_chrono / 1000 };
   }
   const payload = {
     id_course: state.id_course,
