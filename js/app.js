@@ -112,6 +112,7 @@ const el = {
   relaisLabel: document.getElementById('relais-label'),
   relaisCountdown: document.getElementById('relais-countdown'),
   relaisRentreTag: document.getElementById('relais-rentre-tag'),
+  pitBanner: document.getElementById('pit-banner'),
 
   rentreBanner: document.getElementById('rentre-banner'),
   rentreOverlay: document.getElementById('rentre-overlay'),
@@ -809,6 +810,7 @@ function render() {
   renderAlarmStatus();
   renderHistorique();
   el.navAlertDot.classList.toggle('hidden', !isRentreActive());
+  el.pitBanner.classList.toggle('hidden', !state.pc_pit_actif);
 
   el.appFrame.classList.toggle('nav-right', state.nav_position === 'right');
   el.navPosLeftBtn.classList.toggle('current', state.nav_position !== 'right');

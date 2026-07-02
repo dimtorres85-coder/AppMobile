@@ -446,6 +446,29 @@ textarea.field { resize: none; }
   font-variant-numeric: tabular-nums;
 }
 
+/* Grand bandeau affiché sur la page Chrono quand le PC signale un pit stop
+   en cours ; flex:none pour ne jamais empiéter sur le rail de nav (qui est
+   en dehors de #page-chrono). */
+.pit-banner {
+  flex: none;
+  margin-bottom: 10px;
+  padding: 18px 16px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #ff9a3c, #ff5a12);
+  border: 1px solid #ffb066;
+  color: #fff;
+  font-weight: 900;
+  font-size: 20px;
+  text-align: center;
+  letter-spacing: 0.04em;
+  box-shadow: 0 8px 24px -8px rgba(255, 90, 16, 0.6);
+  animation: pitPulse 1.4s ease-in-out infinite;
+}
+@keyframes pitPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.88; transform: scale(1.015); }
+}
+
 /* Chrono en cours (left) + Fin de relais (right), side by side. */
 .chrono-split-card {
   display: flex;
