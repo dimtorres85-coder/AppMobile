@@ -401,12 +401,22 @@ textarea.field { resize: none; }
 .settings-actions .btn-gold { flex: 1; }
 
 /* ===== Page: Chrono ===== */
+/* This whole page is a flex column so the laps list is the only part that
+   scrolls internally — everything else (pilot, chrono, TOUR, controls)
+   stays on screen without scrolling the page. */
+
+#page-chrono {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+#page-chrono > *:not(.laps-card) { flex: none; }
 
 .chrono-header {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 .chrono-header .page-title { flex: 1; }
 .chrono-header__clock {
@@ -416,75 +426,71 @@ textarea.field { resize: none; }
   font-variant-numeric: tabular-nums;
 }
 
-.relay-card {
-  padding: 14px 18px;
-  margin-bottom: 14px;
-  border-radius: 16px;
+/* Chrono en cours (left) + Fin de relais (right), side by side. */
+.chrono-split-card {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px 14px;
   text-align: center;
-  background: var(--card);
-  border: 1px solid var(--border-2);
 }
-.relay-card__label {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
-  letter-spacing: .2em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  font-weight: 500;
-}
-.relay-card__value {
+.chrono-split__col { flex: 1; min-width: 0; }
+.chrono-split__sep { width: 1px; flex: none; background: var(--border-3); align-self: stretch; }
+.chrono-split__value {
   font-family: 'Barlow Semi Condensed', 'Barlow', sans-serif;
   font-weight: 800;
-  font-size: 46px;
-  line-height: 1.02;
+  font-size: 30px;
+  line-height: 1.05;
   font-variant-numeric: tabular-nums;
   color: var(--gold);
-  margin-top: 4px;
+  margin-top: 3px;
 }
-.relay-card__sub {
+.chrono-split__value--lap { color: var(--orange); }
+#relais-col.paused .chrono-split__value { color: var(--text-dim2); }
+#relais-col.urgent .chrono-split__value,
+#relais-col.overtime .chrono-split__value { color: var(--red-2); }
+#relais-col.urgent, #relais-col.overtime { animation: bpPulse 1s ease-in-out infinite; }
+
+.relais-flag {
+  margin: 6px 0 0;
+  text-align: center;
+  font-weight: 900;
+  font-size: 12.5px;
+  letter-spacing: .08em;
+  color: var(--red-2);
+}
+.relais-sub {
+  margin: 6px 0 0;
+  text-align: center;
   font-family: 'JetBrains Mono', monospace;
   font-size: 10.5px;
   color: var(--text-muted);
-  margin-top: 5px;
 }
-.relay-card.urgent {
-  animation: bpFlash 1s steps(1,end) infinite, bpRing 1.4s ease-out infinite;
-}
-.relay-card.urgent .relay-card__label { color: rgba(255,255,255,.85); font-weight: 600; }
-.relay-card.urgent .relay-card__value { font-size: 48px; color: #fff; margin: 2px 0; }
-.relay-card.urgent .relay-card__rentre {
-  font-weight: 900;
-  font-size: 15px;
-  letter-spacing: .1em;
-  color: #fff;
-  margin-top: 2px;
-}
-.relay-card.paused .relay-card__value { color: var(--text-dim2); }
 
-.tour-wrap { display: flex; flex-direction: column; align-items: center; margin: 4px 0; }
+.tour-wrap { display: flex; flex-direction: column; align-items: center; margin: 10px 0 6px; }
 .tour-btn {
   position: relative;
   width: 100%;
   aspect-ratio: 1 / 1;
-  max-width: 320px;
+  max-width: 168px;
   border: none;
   border-radius: 50%;
   cursor: pointer;
   background: radial-gradient(120% 120% at 38% 28%, #ff9a3c 0%, #ff6a12 40%, #ff4d00 74%, #e23e00 100%);
-  box-shadow: 0 20px 60px -14px rgba(255,90,16,.75), inset 0 3px 2px rgba(255,255,255,.4), inset 0 -18px 34px rgba(150,40,0,.5);
+  box-shadow: 0 14px 40px -12px rgba(255,90,16,.75), inset 0 3px 2px rgba(255,255,255,.4), inset 0 -18px 34px rgba(150,40,0,.5);
   touch-action: manipulation;
 }
 .tour-btn:active { transform: scale(.975); }
 .tour-btn__ring {
   position: absolute;
-  inset: 10px;
+  inset: 8px;
   border-radius: 50%;
   border: 1.5px solid rgba(255,255,255,.16);
   pointer-events: none;
 }
 .tour-btn__label {
   font-weight: 900;
-  font-size: 62px;
+  font-size: 32px;
   letter-spacing: .04em;
   color: #fff;
   text-shadow: 0 2px 16px rgba(120,30,0,.5);
@@ -496,16 +502,16 @@ textarea.field { resize: none; }
 .tour-btn__paused-tag {
   position: absolute;
   left: 50%;
-  bottom: 28%;
+  bottom: 22%;
   transform: translateX(-50%);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  letter-spacing: .2em;
+  font-size: 9.5px;
+  letter-spacing: .15em;
   text-transform: uppercase;
   color: rgba(255,255,255,.85);
   font-weight: 600;
 }
-.tour-foot { text-align: center; margin-top: 12px; }
+.tour-foot { text-align: center; margin-top: 8px; }
 .tour-foot__hint { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted); }
 .tour-foot__last {
   font-family: 'JetBrains Mono', monospace;
@@ -516,25 +522,31 @@ textarea.field { resize: none; }
   font-variant-numeric: tabular-nums;
 }
 
-.rec-controls { display: flex; gap: 10px; margin: 14px 0; }
-.rec-controls .btn { flex: 1; padding: 15px 6px; font-size: 13.5px; }
+.rec-controls { display: flex; gap: 10px; margin: 10px 0; }
+.rec-controls .btn { flex: 1; padding: 13px 6px; font-size: 13.5px; min-height: 42px; }
 .rec-toggle-btn { background: transparent; border: 1px solid var(--border-5); color: var(--amber); }
 .rec-toggle-btn.paused { background: #2a1e06; border-color: #7a5a12; }
 .undo-btn { background: transparent; border: 1px solid var(--border-4); color: var(--text-soft); }
 
 .laps-card {
+  flex: 1 1 auto;
+  min-height: 110px;
+  display: flex;
+  flex-direction: column;
   background: var(--card-alt);
   border: 1px solid var(--border-1);
   border-radius: 16px;
   overflow: hidden;
 }
 .laps-card__head {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 13px 16px;
   border-bottom: 1px solid var(--border-1);
 }
+#laps-list { flex: 1; min-height: 0; overflow-y: auto; }
 .laps-card__title {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10.5px;
@@ -735,14 +747,13 @@ textarea.field { resize: none; }
 .pilot-row__delete:active { background: var(--red-bg); color: var(--red-3); }
 
 /* Pilot chip on the Chrono page: name + inline "Changer" toggle. */
-.pilot-chip-card { padding-bottom: 12px; }
+.pilot-chip-card { padding: 12px 16px; }
 .pilot-chip {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-top: 4px;
   padding: 0;
   background: transparent;
   border: none;
@@ -753,7 +764,7 @@ textarea.field { resize: none; }
 .pilot-chip__name {
   font-family: 'Barlow Semi Condensed', 'Barlow', sans-serif;
   font-weight: 800;
-  font-size: 24px;
+  font-size: 19px;
   color: var(--text);
 }
 .pilot-chip__change {
@@ -762,10 +773,7 @@ textarea.field { resize: none; }
   font-size: 11px;
   color: var(--gold);
 }
-.pilot-chip-card .pilot-list { margin-top: 12px; margin-bottom: 0; }
-
-.current-lap-card { padding-bottom: 14px; }
-.current-lap-card .session-card__value { color: var(--orange); }
+.pilot-chip-card .pilot-list { margin-top: 10px; margin-bottom: 0; }
 
 .add-pilot-row { display: flex; gap: 9px; }
 .add-pilot-row input {

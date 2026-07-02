@@ -35,6 +35,7 @@ const el = {
 
   pilotActuel: document.getElementById('pilote-actuel'),
   piloteDivergence: document.getElementById('pilote-divergence'),
+  syncPiloteBtn: document.getElementById('sync-pilote-btn'),
 
   tourBtn: document.getElementById('tour-btn'),
   tourPausedTag: document.getElementById('tour-paused-tag'),
@@ -95,7 +96,7 @@ const el = {
   alarmSub: document.getElementById('alarm-sub'),
   alarmStatus: document.getElementById('alarm-status'),
 
-  relaisCard: document.getElementById('relais-card'),
+  relaisCol: document.getElementById('relais-col'),
   relaisLabel: document.getElementById('relais-label'),
   relaisCountdown: document.getElementById('relais-countdown'),
   relaisRentreTag: document.getElementById('relais-rentre-tag'),
@@ -489,6 +490,26 @@ function adoptPcPiloteIfNone(nom) {
   if (pilote) state.pilote_courant_id = pilote.id;
 }
 
+// Manual recovery from a bad manip on the phone: re-adopt the PC's current
+// pilot even though a local selection already exists (adoptPcPiloteIfNone
+// above only ever does this once, automatically, when nothing is selected).
+function syncPiloteFromPc() {
+  if (!state.pc_pilote_courant) {
+    showToast('Aucune info pilote reçue du PC pour l’instant.');
+    return;
+  }
+  const pilote = state.pilotes.find((p) => p.nom === state.pc_pilote_courant);
+  if (!pilote) {
+    showToast('Pilote PC inconnu localement : ' + state.pc_pilote_courant);
+    return;
+  }
+  if (pilote.id === state.pilote_courant_id) {
+    showToast('Déjà synchronisé avec le PC.');
+    return;
+  }
+  selectPilote(pilote.id);
+}
+
 function onPcState(raw) {
   if (!raw) return; // nothing published yet — keep current fallback UI
   if (Array.isArray(raw.roster)) {
@@ -807,26 +828,37 @@ function renderChronoPilotList() {
 function renderRelais() {
   const snap = state.relais_snapshot;
   if (!snap || !snap.cible_fin_ts) {
-    el.relaisCard.classList.add('hidden');
+    el.relaisCol.classList.remove('urgent', 'paused', 'overtime');
+    el.relaisLabel.textContent = 'Fin de relais';
+    el.relaisCountdown.textContent = '--:--';
+    el.relaisRentreTag.classList.add('hidden');
+    el.courseCountdownLine.classList.add('hidden');
     return;
   }
-  el.relaisCard.classList.remove('hidden');
   const remainingMs = state.pause
     ? snap.cible_fin_ts - (state.pc_state_recv_ts ?? now())
     : snap.cible_fin_ts - now();
   const approx = snap.mode_alerte === 'tours';
   const active = !!(state.rentre && state.rentre.actif);
+  // Past the target: don't freeze at 0 — keep counting up so it's obvious
+  // (and by how much) the rider is overdue.
+  const overtime = remainingMs < 0;
 
-  el.relaisCard.classList.toggle('urgent', active);
-  el.relaisCard.classList.toggle('paused', state.pause && !active);
+  el.relaisCol.classList.toggle('urgent', active && !overtime);
+  el.relaisCol.classList.toggle('overtime', overtime);
+  el.relaisCol.classList.toggle('paused', state.pause && !active && !overtime);
   el.relaisRentreTag.classList.toggle('hidden', !active);
-  el.relaisLabel.textContent = active
-    ? 'Fin de relais'
-    : state.pause
-      ? 'Fin de relais (en pause)'
-      : 'Fin de relais';
+  el.relaisLabel.textContent = overtime
+    ? 'Relais dépassé'
+    : active
+      ? 'Fin de relais'
+      : state.pause
+        ? 'Fin de relais (en pause)'
+        : 'Fin de relais';
 
-  if (approx) {
+  if (overtime) {
+    el.relaisCountdown.textContent = '+' + formatDuration(-remainingMs);
+  } else if (approx) {
     // "tours restants" display per design spec — falls back to an
     // approximate time countdown if the PC hasn't published a tour count yet.
     el.relaisCountdown.textContent = typeof snap.tours_restants === 'number'
@@ -980,6 +1012,7 @@ el.recordingToggleBtn.addEventListener('click', toggleRecording);
 el.chronoPilotBtn.addEventListener('click', () => {
   el.chronoPilotList.classList.toggle('hidden');
 });
+el.syncPiloteBtn.addEventListener('click', syncPiloteFromPc);
 el.pilotAddForm.addEventListener('submit', (e) => {
   e.preventDefault();
   addPilote(el.pilotAddInput.value);
