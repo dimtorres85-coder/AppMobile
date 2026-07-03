@@ -168,6 +168,25 @@ export function listenAlarmAck(idCourse, idUnique, cb) {
   };
 }
 
+// Same as listenAlarmAck, but for the "seen" flag — written only once the PC
+// operator manually dismisses the alert (vs. ack, written automatically the
+// moment the message lands on the PC, regardless of anyone being at the desk).
+export function listenAlarmSeen(idCourse, idUnique, cb) {
+  let liveUnsub = null;
+  let cancelled = false;
+  ensureConnected().then((db) => {
+    if (!db || cancelled) return;
+    const r = firebaseModules.ref(db, `sessions/${idCourse}/alarms/${idUnique}/seen`);
+    const handler = (snap) => cb(snap.val());
+    firebaseModules.onValue(r, handler);
+    liveUnsub = () => firebaseModules.off(r, 'value', handler);
+  });
+  return () => {
+    cancelled = true;
+    if (liveUnsub) liveUnsub();
+  };
+}
+
 // Returns an unsubscribe function. Silently no-ops if unconfigured.
 export function listenState(idCourse, cb) {
   let liveUnsub = null;

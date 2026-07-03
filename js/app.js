@@ -735,6 +735,11 @@ function fireAlarm() {
     type: 'ALERTE',
     acked: false,
     ack_ts: null,
+    // "seen" is written only when the PC operator manually dismisses the
+    // alert — distinct from "acked", written the instant it lands on the
+    // PC regardless of anyone actually being at the desk.
+    seen: false,
+    seen_ts: null,
   };
   state.alarms.push(alarm);
   if (state.alarms.length > 5) state.alarms = state.alarms.slice(-5);
@@ -746,7 +751,7 @@ function fireAlarm() {
 
 function listenAlarmAckIfNeeded(alarm) {
   if (!state.id_course || alarmAckUnsubscribes.has(alarm.id_unique)) return;
-  const unsub = transport.listenAlarmAck(state.id_course, alarm.id_unique, (ackVal) => {
+  const unsubAck = transport.listenAlarmAck(state.id_course, alarm.id_unique, (ackVal) => {
     if (!ackVal) return;
     const found = state.alarms.find((a) => a.id_unique === alarm.id_unique);
     if (found && !found.acked) {
@@ -754,10 +759,20 @@ function listenAlarmAckIfNeeded(alarm) {
       found.ack_ts = ackVal.timestamp || now();
       persist();
       render();
+    }
+  });
+  const unsubSeen = transport.listenAlarmSeen(state.id_course, alarm.id_unique, (seenVal) => {
+    if (!seenVal) return;
+    const found = state.alarms.find((a) => a.id_unique === alarm.id_unique);
+    if (found && !found.seen) {
+      found.seen = true;
+      found.seen_ts = seenVal.timestamp || now();
+      persist();
+      render();
       playPreset(state.sound_prefs.alarm_ack);
     }
   });
-  alarmAckUnsubscribes.set(alarm.id_unique, unsub);
+  alarmAckUnsubscribes.set(alarm.id_unique, () => { unsubAck(); unsubSeen(); });
 }
 
 async function sendAlarm(alarm) {
@@ -776,12 +791,10 @@ async function sendAlarm(alarm) {
 
 function retryUnackedAlarms() {
   if (!transport.isConfigured() || !state.id_course) return;
-  state.alarms
-    .filter((a) => !a.acked)
-    .forEach((a) => {
-      listenAlarmAckIfNeeded(a);
-      transport.pushAlarm(state.id_course, a).catch(() => {});
-    });
+  state.alarms.forEach((a) => {
+    if (!a.seen) listenAlarmAckIfNeeded(a);
+    if (!a.acked) transport.pushAlarm(state.id_course, a).catch(() => {});
+  });
 }
 
 // ---- Rendering ----
@@ -1132,12 +1145,12 @@ function renderAlarmStatus() {
     el.alarmStatus.classList.add('hidden');
     return;
   }
-  el.alarmStatus.classList.remove('hidden', 'sending', 'acked', 'unsent');
-  if (last.acked) {
-    el.alarmStatus.innerHTML = '<span>✓</span><span>PC prévenu</span>';
-    el.alarmStatus.classList.add('acked');
-    // Resets back to idle a few seconds after the PC acks, instead of
-    // leaving "PC prévenu" on screen indefinitely.
+  el.alarmStatus.classList.remove('hidden', 'sending', 'acked', 'seen', 'unsent');
+  if (last.seen) {
+    el.alarmStatus.innerHTML = '<span>✓✓</span><span>PC a validé l’alerte</span>';
+    el.alarmStatus.classList.add('seen');
+    // Auto-hide only once a human on the PC has actually dismissed it —
+    // "acked" alone just means the message arrived, not that anyone saw it.
     if (alarmStatusScheduledForId !== last.id_unique) {
       alarmStatusScheduledForId = last.id_unique;
       clearTimeout(alarmStatusAutoHideTimer);
@@ -1146,6 +1159,9 @@ function renderAlarmStatus() {
         render();
       }, 4000);
     }
+  } else if (last.acked) {
+    el.alarmStatus.innerHTML = '<span>✓</span><span>Reçu — en attente de validation</span>';
+    el.alarmStatus.classList.add('acked');
   } else if (!state.id_course || !transport.isConfigured() || !transport.isConnected()) {
     el.alarmStatus.innerHTML = '<span>⚠</span><span>Non remis (réseau)</span>';
     el.alarmStatus.classList.add('unsent');
@@ -1524,7 +1540,7 @@ el.settingsConfigInput.value = transport.loadTransportConfig()
 // the Accueil page reflects real connectivity right away.
 transport.connectIfConfigured();
 if (state.id_course) subscribeToCourse();
-state.alarms.filter((a) => !a.acked).forEach((a) => listenAlarmAckIfNeeded(a));
+state.alarms.filter((a) => !a.seen).forEach((a) => listenAlarmAckIfNeeded(a));
 
 goToPage('accueil');
 render();

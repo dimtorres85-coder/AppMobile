@@ -301,10 +301,18 @@ function onLapReceived(key,val){ if(!val) return; const id=val.id_unique||key; i
   state.inbox.push({ id, ts:val.timestamp||now(), val:sec, pilote:val.pilote_vu_tel||'', relEst:val.id_relais_estime, pseudo:val.pseudo||'' });
   save(); if(state.phase==='laps') render(); toast('⬇ Chrono reçu du téléphone'); }
 function onAlarmReceived(key,val){ if(!val) return; const id=val.id_unique||key; if(state.seenAlarms[id]) return; state.seenAlarms[id]=true; save();
+  // « ack » = message bien arrivé sur le PC (automatique, pas une validation
+  // humaine). « seen », écrit uniquement par dismissAlarmTel(), signale que
+  // le régisseur a réellement traité l'alerte — distinction demandée pour
+  // les cas où personne n'est devant l'écran au moment de la réception.
   try{ SYNC.db.ref('sessions/'+SYNC.code+'/alarms/'+id+'/ack').set({timestamp:Math.round(now())}); }catch(e){}
   const ts=(val&&val.timestamp)||now(); if(ts < SYNC.connectTs-5000) return;   // ne pas rejouer l'historique au (re)branchement
   state.alarmTel={ id, ts }; state.alertReturn=['live','laps','stats','settings','driver'].includes(state.phase)?state.phase:'live';
   beepAlarm(); go('alarmTel'); }
+function dismissAlarmTel(){
+  if(state.alarmTel){ try{ SYNC.db.ref('sessions/'+SYNC.code+'/alarms/'+state.alarmTel.id+'/seen').set({timestamp:Math.round(now())}); }catch(e){} }
+  state.alarmTel=null; go(state.alertReturn||'live');
+}
 function beepAlarm(){ playAlertSound('alarm'); }
 function placeInboxLap(item){ const seg=state.relais[state.selSeg]; if(seg){ snapshot(); seg.laps.push(item.val); }
   state.inbox=state.inbox.filter(x=>x.id!==item.id); save(); render(); toast('Chrono placé dans le relais nº '+(state.selSeg+1)); }
@@ -562,11 +570,14 @@ function customAlertTriggered(a, rRem, cRem){
   }
   if(a.mode==='laps'){
     const pace = driverPace(cur.driverIdx);
+    // Sans allure connue (aucun tour mesuré ni moyenne/meilleur temps renseigné),
+    // impossible d'estimer un nombre de tours restants : on se rabat sur la fin
+    // du relais/course plutôt que de ne jamais déclencher silencieusement.
     if(relais){
-      if(a.anchor==='end'){ if(!pace) return false; return rRem/pace<=a.value; }
+      if(a.anchor==='end') return pace ? (rRem/pace<=a.value) : (rRem<=0);
       return cur.laps.length>=a.value;
     }
-    if(a.anchor==='end'){ if(!pace) return false; return cRem/pace<=a.value; }
+    if(a.anchor==='end') return pace ? (cRem/pace<=a.value) : (cRem<=0);
     return totalRaceLapsDone()>=a.value;
   }
   return false;
@@ -693,7 +704,7 @@ function syncCustomAlertDraftFromForm(){
   if(gv('ca-scope')!==undefined) d.scope=gv('ca-scope');
   if(gv('ca-sound')!==undefined) d.sound=gv('ca-sound');
   if(gv('ca-clocktime')!==undefined) d.clockTime=gv('ca-clocktime');
-  if(gv('ca-value')!==undefined){ const rv=Number(gv('ca-value'))||0; d.value = d.mode==='laps'? rv : rv*60; }
+  if(gv('ca-value')!==undefined){ const rv=Number(String(gv('ca-value')).replace(',','.'))||0; d.value = d.mode==='laps'? rv : rv*60; }
 }
 function saveCustomAlertDraft(){
   syncCustomAlertDraftFromForm();
@@ -1586,7 +1597,7 @@ function wire(){
   }
   if(ph==='alertR'){ on('alertR-root','click',()=>go(state.alertReturn||'live')); }
   if(ph==='alertF'){ on('alertF-root','click',()=>go(state.alertReturn||'live')); }
-  if(ph==='alarmTel'){ on('alarmtel-root','click',()=>{ state.alarmTel=null; go(state.alertReturn||'live'); }); }
+  if(ph==='alarmTel'){ on('alarmtel-root','click',dismissAlarmTel); }
   if(ph==='finish'){ on('f-stats','click',()=>{ state.statsReturn='finish'; go('stats'); }); on('f-config','click',()=>go('config')); }
   if(ph==='crashpit'){ on('cp-yes','click',crashPitYes); on('cp-no','click',()=>go('crashmin')); }
   if(ph==='crashmin'){ on('cm-go','click',()=>crashPitMinutes(Number($('#cm-input').value)||0)); on('cm-unknown','click',()=>crashPitMinutes(0));
@@ -1625,7 +1636,7 @@ function onKey(e){
     if(ph==='pit' || ph==='pitc'){ cancelPit(); return; }
     if(ph==='driver'){ go(state.driverReturn||'live'); return; }
     if(ph==='alertR'||ph==='alertF'){ go(state.alertReturn||'live'); return; }
-    if(ph==='alarmTel'){ state.alarmTel=null; go(state.alertReturn||'live'); return; }
+    if(ph==='alarmTel'){ dismissAlarmTel(); return; }
     if(ph==='armed'){ go('config'); return; }
     if(ph==='laps'){ go('live'); return; }
     if(ph==='stats'){ go(state.statsReturn||'live'); return; }

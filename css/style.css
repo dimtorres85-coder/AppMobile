@@ -107,6 +107,9 @@ html, body {
   background: var(--bg);
   color: var(--text);
   font-family: 'Barlow', system-ui, sans-serif;
+  /* Plein soleil : une base bien plus grasse que "normal" (400, jamais même
+     chargé) reste lisible au premier coup d'œil malgré le glare. */
+  font-weight: 600;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
@@ -318,7 +321,7 @@ button, input, textarea { font-family: inherit; }
   letter-spacing: .2em;
   text-transform: uppercase;
   color: var(--text-muted);
-  font-weight: 500;
+  font-weight: 700;
 }
 .card-desc {
   margin: 6px 0 10px;
@@ -699,7 +702,7 @@ textarea.field { resize: none; }
   letter-spacing: .2em;
   text-transform: uppercase;
   color: var(--text-muted);
-  font-weight: 500;
+  font-weight: 700;
 }
 .laps-card__count { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); }
 .laps-card__pending {
@@ -812,7 +815,8 @@ textarea.field { resize: none; }
   font-weight: 600;
 }
 .alerte-zone__status.sending { color: var(--amber); }
-.alerte-zone__status.acked { color: var(--green); }
+.alerte-zone__status.acked { color: var(--text-muted); }
+.alerte-zone__status.seen { color: var(--green); }
 .alerte-zone__status.unsent { color: var(--red-2); }
 
 .alerte-net-footer { margin-top: 14px; }
