@@ -99,7 +99,7 @@
      le décor, jour ou nuit). */
   --action-red: #e21414;
   --action-red-dark: #700000;
-  --chrono-blue: #0d47d9;
+  --chrono-green: #0d9c47;
 
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -353,9 +353,9 @@ button, input, textarea { font-family: inherit; }
 }
 textarea.field { resize: none; }
 
-/* Boutons d'action : toujours rouge, toujours un contour épais — la seule
-   chose qui change, c'est plein (action principale) ou creux (secondaire/
-   annuler), jamais la couleur. */
+/* Boutons d'action : toujours entièrement rouge, jamais creux — un relief
+   (bord inférieur épais + ombre) donne l'aspect "physique" relâché, qui
+   s'aplatit quand le bouton est enfoncé. */
 .btn {
   appearance: none;
   border: 4px solid var(--action-red-dark);
@@ -368,19 +368,18 @@ textarea.field { resize: none; }
   min-height: 48px;
   background: var(--action-red);
   color: #fff;
+  box-shadow: 0 4px 0 var(--action-red-dark), 0 7px 14px rgba(0,0,0,.28);
+  transition: box-shadow .08s ease, transform .08s ease;
 }
-.btn:active { transform: scale(.98); }
-.btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
-.btn-gold, .btn-orange, .btn-danger {
+.btn:active {
+  transform: translateY(4px);
+  box-shadow: 0 0 0 var(--action-red-dark), 0 2px 6px rgba(0,0,0,.22);
+}
+.btn:disabled { opacity: .4; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-gold, .btn-orange, .btn-danger, .btn-ghost, .btn-outline, .btn-danger-outline {
   background: var(--action-red);
   border-color: var(--action-red-dark);
   color: #fff;
-  box-shadow: none;
-}
-.btn-ghost, .btn-outline, .btn-danger-outline {
-  background: var(--card);
-  border: 4px solid var(--action-red);
-  color: var(--action-red);
 }
 
 .status-pill {
@@ -438,7 +437,7 @@ textarea.field { resize: none; }
   line-height: 1;
   font-variant-numeric: tabular-nums;
   margin-top: 6px;
-  color: var(--chrono-blue);
+  color: var(--chrono-green);
 }
 
 .pairing-joined__row { display: flex; align-items: center; gap: 10px; }
@@ -485,12 +484,15 @@ textarea.field { resize: none; }
   gap: 3px;
   font-weight: 900;
   font-size: 12px;
-  background: var(--card);
-  border: 3px solid var(--action-red);
+  background: var(--action-red);
+  border: 3px solid var(--action-red-dark);
   border-radius: 12px;
-  color: var(--action-red);
+  color: #fff;
   cursor: pointer;
+  box-shadow: 0 3px 0 var(--action-red-dark), 0 5px 10px rgba(0,0,0,.26);
+  transition: box-shadow .08s ease, transform .08s ease;
 }
+.qr-btn:active { transform: translateY(3px); box-shadow: 0 0 0 var(--action-red-dark), 0 1px 4px rgba(0,0,0,.2); }
 .qr-btn__icon { font-size: 18px; line-height: 1; }
 
 .settings-textarea {
@@ -530,7 +532,7 @@ textarea.field { resize: none; }
   font-size: 14px;
   cursor: pointer;
 }
-.nav-position-btn.current { background: var(--action-red); border-color: var(--action-red-dark); color: #fff; }
+.nav-position-btn.current { background: var(--action-red); border-color: var(--action-red-dark); color: #fff; box-shadow: inset 0 2px 6px rgba(0,0,0,.35); }
 
 .sound-row {
   display: flex;
@@ -554,13 +556,15 @@ textarea.field { resize: none; }
   width: 40px;
   height: 40px;
   border-radius: 10px;
-  border: 3px solid var(--action-red);
-  background: var(--card);
-  color: var(--action-red);
+  border: 3px solid var(--action-red-dark);
+  background: var(--action-red);
+  color: #fff;
   font-size: 16px;
   cursor: pointer;
+  box-shadow: 0 3px 0 var(--action-red-dark), 0 5px 8px rgba(0,0,0,.24);
+  transition: box-shadow .08s ease, transform .08s ease;
 }
-.sound-row__test:active { transform: scale(.94); }
+.sound-row__test:active { transform: translateY(3px); box-shadow: 0 0 0 var(--action-red-dark), 0 1px 3px rgba(0,0,0,.2); }
 
 /* ===== Page: Chrono ===== */
 /* This whole page is a flex column so the laps list is the only part that
@@ -585,7 +589,7 @@ textarea.field { resize: none; }
   font-family: 'Barlow', sans-serif;
   font-weight: 800;
   font-size: 14px;
-  color: var(--chrono-blue);
+  color: var(--chrono-green);
   font-variant-numeric: tabular-nums;
 }
 
@@ -628,7 +632,7 @@ textarea.field { resize: none; }
   font-size: 32px;
   line-height: 1.05;
   font-variant-numeric: tabular-nums;
-  color: var(--chrono-blue);
+  color: var(--chrono-green);
   margin-top: 3px;
 }
 #relais-col.paused .chrono-split__value { color: var(--text-dim2); }
@@ -668,8 +672,12 @@ textarea.field { resize: none; }
   background: radial-gradient(120% 120% at 38% 28%, #ff5252 0%, #e21414 45%, #a30000 100%);
   box-shadow: 0 14px 40px -12px rgba(226,20,20,.75), inset 0 3px 2px rgba(255,255,255,.35), inset 0 -18px 34px rgba(80,0,0,.5);
   touch-action: manipulation;
+  transition: box-shadow .08s ease, transform .08s ease;
 }
-.tour-btn:active { transform: scale(.975); }
+.tour-btn:active {
+  transform: scale(.97);
+  box-shadow: 0 4px 14px -8px rgba(226,20,20,.7), inset 0 3px 10px rgba(80,0,0,.6);
+}
 .tour-btn__ring {
   position: absolute;
   inset: 8px;
@@ -714,8 +722,8 @@ textarea.field { resize: none; }
 
 .rec-controls { display: flex; gap: 10px; margin: 10px 0; }
 .rec-controls .btn { flex: 1; padding: 13px 6px; font-size: 13.5px; min-height: 42px; }
-.rec-toggle-btn { background: var(--card); border: 4px solid var(--action-red); color: var(--action-red); }
-.undo-btn { background: var(--card); border: 4px solid var(--action-red); color: var(--action-red); }
+.rec-toggle-btn { background: var(--action-red); border: 4px solid var(--action-red-dark); color: #fff; }
+.undo-btn { background: var(--action-red); border: 4px solid var(--action-red-dark); color: #fff; }
 
 /* Panneau d'affichage pur (liste des tours) : pas de cadre, seul le fond le
    délimite. */
@@ -776,7 +784,7 @@ textarea.field { resize: none; }
   font-family: 'Barlow Semi Condensed', 'Barlow', sans-serif;
   font-weight: 900;
   font-size: 20px;
-  color: var(--chrono-blue);
+  color: var(--chrono-green);
   font-variant-numeric: tabular-nums;
   line-height: 1.1;
 }
@@ -899,7 +907,7 @@ textarea.field { resize: none; }
   cursor: pointer;
   text-align: left;
 }
-.pilot-row-btn.current { background: var(--action-red); border-color: var(--action-red-dark); }
+.pilot-row-btn.current { background: var(--action-red); border-color: var(--action-red-dark); box-shadow: inset 0 2px 6px rgba(0,0,0,.35); }
 .pilot-row-btn__mark { width: 18px; flex: none; color: var(--action-red); font-size: 14px; }
 .pilot-row-btn__name { flex: 1; font-weight: 800; font-size: 17px; color: var(--text); }
 .pilot-row-btn.current .pilot-row-btn__mark,
@@ -914,7 +922,7 @@ textarea.field { resize: none; }
   border-radius: 13px;
   overflow: hidden;
 }
-.pilot-row.current { background: var(--action-red); }
+.pilot-row.current { background: var(--action-red); box-shadow: inset 0 2px 6px rgba(0,0,0,.3); }
 .pilot-row.current .pilot-row__select { color: #fff; }
 .pilot-row__select {
   flex: 1;
@@ -993,7 +1001,10 @@ textarea.field { resize: none; }
   font-size: 20px;
   color: #fff;
   cursor: pointer;
+  box-shadow: 0 4px 0 var(--action-red-dark), 0 6px 12px rgba(0,0,0,.26);
+  transition: box-shadow .08s ease, transform .08s ease;
 }
+.add-pilot-row button:active { transform: translateY(3px); box-shadow: 0 0 0 var(--action-red-dark), 0 1px 4px rgba(0,0,0,.2); }
 
 .course-actions { display: flex; flex-direction: column; gap: 10px; }
 .course-actions .btn { width: 100%; padding: 15px; font-size: 15px; }
@@ -1021,7 +1032,7 @@ textarea.field { resize: none; }
   white-space: nowrap;
   cursor: pointer;
 }
-.hist-tab.current { background: var(--action-red); border-color: var(--action-red-dark); color: #fff; }
+.hist-tab.current { background: var(--action-red); border-color: var(--action-red-dark); color: #fff; box-shadow: inset 0 2px 6px rgba(0,0,0,.35); }
 
 /* ===== Modals ===== */
 
