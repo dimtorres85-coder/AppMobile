@@ -1,6 +1,6 @@
 // Offline cache for the trackside PWA app shell.
 // Bump CACHE_VERSION whenever any precached file changes.
-const CACHE_VERSION = 'trackside-v10';
+const CACHE_VERSION = 'trackside-v11';
 // Separate, long-lived cache for the Google Fonts CSS + woff2 files so an
 // app-shell update doesn't force re-downloading them, and so they still
 // work offline once fetched at least once.
