@@ -16,6 +16,11 @@ export function createDefaultState() {
     version: 1,
     session_local_id: generateId(),
 
+    // Pseudo de la personne au bord de piste (pas le pilote) — permanent,
+    // saisi une seule fois, jamais remis à zéro par un reset côté PC ; sert
+    // à identifier qui a envoyé quel chrono.
+    pseudo: null,
+
     // Pairing (§16.3)
     id_course: null,
     paired_ts: null,

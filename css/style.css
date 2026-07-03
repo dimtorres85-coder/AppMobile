@@ -1128,3 +1128,41 @@ textarea.field { resize: none; }
   cursor: pointer;
   box-shadow: 0 14px 40px rgba(0,0,0,.4);
 }
+
+/* Écran obligatoire de saisie du pseudo au premier lancement. */
+.pseudo-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+}
+.pseudo-overlay.hidden { display: none; }
+.pseudo-overlay__box {
+  width: 100%;
+  max-width: 320px;
+  text-align: center;
+}
+.pseudo-overlay__title {
+  font-weight: 900;
+  font-size: 30px;
+  color: var(--text);
+}
+.pseudo-overlay__sub {
+  margin-top: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+#pseudo-form { margin-top: 26px; display: flex; flex-direction: column; gap: 12px; }
+.pseudo-overlay__input {
+  padding: 16px 14px;
+  font-size: 20px;
+  font-weight: 700;
+  text-align: center;
+}
+.pseudo-overlay__ok { padding: 16px; font-size: 17px; }

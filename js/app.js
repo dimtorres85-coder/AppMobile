@@ -123,6 +123,10 @@ const el = {
   finishOverlay: document.getElementById('finish-overlay'),
   finishOverlayOk: document.getElementById('finish-overlay-ok'),
 
+  pseudoOverlay: document.getElementById('pseudo-overlay'),
+  pseudoForm: document.getElementById('pseudo-form'),
+  pseudoInput: document.getElementById('pseudo-input'),
+
   appFrame: document.getElementById('app-frame'),
   navPosLeftBtn: document.getElementById('nav-pos-left-btn'),
   navPosRightBtn: document.getElementById('nav-pos-right-btn'),
@@ -210,6 +214,7 @@ function recordLap() {
     valeur_chrono,
     pilote_vu_tel: pilote ? pilote.nom : null,
     id_relais_estime: state.relais_estime_courant,
+    pseudo: state.pseudo || null,
   };
 
   state.laps.push(lap);
@@ -342,9 +347,11 @@ function resetSession() {
 
   const keepPilotes = state.pilotes;
   const keepCurrent = state.pilote_courant_id;
+  const keepPseudo = state.pseudo;
   state = createDefaultState();
   state.pilotes = keepPilotes;
   state.pilote_courant_id = keepCurrent;
+  state.pseudo = keepPseudo;
   persist();
   render();
   showToast('Nouvelle session démarrée.');
@@ -846,6 +853,10 @@ function render() {
   el.soundRentre.value = state.sound_prefs.rentre;
   el.soundFinish.value = state.sound_prefs.finish;
   el.soundAlarmAck.value = state.sound_prefs.alarm_ack;
+
+  const needsPseudo = !state.pseudo;
+  el.pseudoOverlay.classList.toggle('hidden', !needsPseudo);
+  if (needsPseudo && document.activeElement !== el.pseudoInput) el.pseudoInput.focus();
 }
 
 function renderPending() {
@@ -1409,6 +1420,15 @@ el.alarmBtn.addEventListener('pointerdown', startAlarmHold);
 
 el.rentreOverlayOk.addEventListener('click', ackRentre);
 el.finishOverlayOk.addEventListener('click', ackRaceOver);
+
+el.pseudoForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const value = el.pseudoInput.value.trim();
+  if (!value) return;
+  state.pseudo = value;
+  persist();
+  render();
+});
 el.rentreBanner.addEventListener('click', () => el.rentreOverlay.classList.remove('hidden'));
 
 document.addEventListener('keydown', (e) => {

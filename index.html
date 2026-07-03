@@ -353,6 +353,20 @@
 </div>
 </div>
 
+<!-- Écran obligatoire au premier lancement : impossible d'utiliser l'appli
+     sans indiquer qui l'utilise (pas le pilote, la personne au bord de piste),
+     pour que le PC sache d'où viennent les chronos reçus. -->
+<div id="pseudo-overlay" class="pseudo-overlay hidden">
+  <div class="pseudo-overlay__box">
+    <div class="pseudo-overlay__title">Qui es-tu ?</div>
+    <div class="pseudo-overlay__sub">Ton pseudo sera joint aux chronos envoyés, pour que le PC sache qui les a saisis.</div>
+    <form id="pseudo-form">
+      <input id="pseudo-input" type="text" class="field pseudo-overlay__input" placeholder="Ton pseudo…" autocomplete="off" maxlength="24" required>
+      <button type="submit" class="btn btn-gold pseudo-overlay__ok">Valider</button>
+    </form>
+  </div>
+</div>
+
 <script type="module" src="./js/app.js"></script>
 </body>
 </html>

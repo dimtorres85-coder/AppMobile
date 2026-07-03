@@ -296,7 +296,7 @@ function fbBuildState(){ const cur=curRelais(); const t=now();
     race_started_at: state.race.startedAt!=null?Math.round(state.race.startedAt):null, race_over:!!state.raceOver, maj_ts:Math.round(t) }; }
 function onLapReceived(key,val){ if(!val) return; const id=val.id_unique||key; if(state.seenLaps[id]) return; state.seenLaps[id]=true;
   const sec = typeof val.valeur_chrono==='number'? val.valeur_chrono : parseLap(String(val.valeur_chrono||''));
-  state.inbox.push({ id, ts:val.timestamp||now(), val:sec, pilote:val.pilote_vu_tel||'', relEst:val.id_relais_estime });
+  state.inbox.push({ id, ts:val.timestamp||now(), val:sec, pilote:val.pilote_vu_tel||'', relEst:val.id_relais_estime, pseudo:val.pseudo||'' });
   save(); if(state.phase==='laps') render(); toast('⬇ Chrono reçu du téléphone'); }
 function onAlarmReceived(key,val){ if(!val) return; const id=val.id_unique||key; if(state.seenAlarms[id]) return; state.seenAlarms[id]=true; save();
   try{ SYNC.db.ref('sessions/'+SYNC.code+'/alarms/'+id+'/ack').set({timestamp:Math.round(now())}); }catch(e){}
@@ -1042,6 +1042,7 @@ const SCREENS = {
           return `<div style="display:flex; align-items:center; gap:14px; padding:8px 12px; border-radius:10px; background:var(--head);">
             <span class="mono" style="font-size:28px; font-weight:700; color:var(--green); width:120px;">${it.val!=null?fmtLapTrim(it.val):'?'}</span>
             <span style="font-size:20px;">tél : <b>${esc(it.pilote||'?')}</b></span>
+            ${it.pseudo?`<span class="muted" style="font-size:18px;">envoyé par <b>${esc(it.pseudo)}</b></span>`:''}
             <span class="muted" style="font-size:18px;">relais estimé ${it.relEst!=null?('R'+it.relEst):'—'}</span>
             ${mism?'<span style="color:#f5a623; font-size:18px;">⚠ pilote tél ≠ pilote PC</span>':''}
             <span style="flex:1;"></span>
