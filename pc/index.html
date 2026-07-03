@@ -463,24 +463,28 @@ function pitRows(){ return state.pitHistory.map(p=>({ at:p.at,
 // Petits graphiques SVG maison (pas de dépendance externe, cohérent avec le
 // reste de l'appli — QR codes, icônes — déjà générés en SVG à la main).
 function svgLineChart(values,opts){
-  opts=opts||{}; const w=opts.width||900,h=opts.height||180,pad=20;
+  opts=opts||{}; const w=opts.width||900,h=opts.height||180,pad=20,topPad=pad+28;
   if(!values.length) return `<div class="muted" style="padding:30px;text-align:center;font-size:20px;">Pas encore de données.</div>`;
+  const fmtVal=opts.format||fmt;
   const min=Math.min(...values),max=Math.max(...values); const range=(max-min)||1;
   const stepX = values.length>1 ? (w-2*pad)/(values.length-1) : 0;
-  const pts = values.map((v,i)=>[pad+i*stepX, h-pad-((v-min)/range)*(h-2*pad)]);
+  const pts = values.map((v,i)=>[pad+i*stepX, h-pad-((v-min)/range)*(h-pad-topPad)]);
   const path = pts.map((p,i)=>(i===0?'M':'L')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
-  const dots = pts.map(p=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="4" fill="${opts.color||'#f5a623'}"/>`).join('');
+  const dots = pts.map((p,i)=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="4" fill="${opts.color||'#f5a623'}"/>
+    <text x="${p[0].toFixed(1)}" y="${(p[1]-12).toFixed(1)}" text-anchor="middle" font-size="15" font-weight="700" fill="${opts.color||'#f5a623'}">${esc(fmtVal(values[i]))}</text>`).join('');
   return `<svg viewBox="0 0 ${w} ${h}" style="width:100%; height:${h}px; display:block;">
     <path d="${path}" fill="none" stroke="${opts.color||'#f5a623'}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
     ${dots}</svg>`;
 }
 function svgBarChart(values,opts){
-  opts=opts||{}; const w=opts.width||900,h=opts.height||180,pad=20;
+  opts=opts||{}; const w=opts.width||900,h=opts.height||180,pad=20,topPad=pad+28;
   if(!values.length) return `<div class="muted" style="padding:30px;text-align:center;font-size:20px;">Pas encore de données.</div>`;
+  const fmtVal=opts.format||fmt;
   const max=Math.max(...values)||1; const n=values.length;
   const slot=(w-2*pad)/n, bw=slot*0.6, gap=slot*0.4;
-  const bars=values.map((v,i)=>{ const bh=(v/max)*(h-2*pad); const x=pad+i*slot+gap/2; const y=h-pad-bh;
-    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1,bh).toFixed(1)}" fill="${opts.color||'#f5a623'}" rx="3"/>`; }).join('');
+  const bars=values.map((v,i)=>{ const bh=(v/max)*(h-pad-topPad); const x=pad+i*slot+gap/2; const y=h-pad-bh;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1,bh).toFixed(1)}" fill="${opts.color||'#f5a623'}" rx="3"/>
+      <text x="${(x+bw/2).toFixed(1)}" y="${(y-8).toFixed(1)}" text-anchor="middle" font-size="15" font-weight="700" fill="${opts.color||'#f5a623'}">${esc(fmtVal(v))}</text>`; }).join('');
   return `<svg viewBox="0 0 ${w} ${h}" style="width:100%; height:${h}px; display:block;">${bars}</svg>`;
 }
 function statTile(label,value){
@@ -511,7 +515,7 @@ function statsDriverTab(idx){
   return `<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
       <div class="panel" style="padding:24px;">
         <div class="muted" style="font-size:20px; text-transform:uppercase; letter-spacing:2px; margin-bottom:14px;">Évolution du chrono</div>
-        ${svgLineChart(det.lapsFlat,{color:'#5fd06f',height:200})}</div>
+        ${svgLineChart(det.lapsFlat,{color:'#5fd06f',height:200,format:fmtLapTrim})}</div>
       <div class="panel" style="padding:24px;">
         <div class="muted" style="font-size:20px; text-transform:uppercase; letter-spacing:2px; margin-bottom:14px;">Temps sur la moto par relais</div>
         ${svgBarChart(det.timePerRelais,{color:'#f5a623',height:200})}</div>
@@ -556,7 +560,7 @@ const JOKE_COUNTERS = [
 ];
 function jokeCountersPanel(){
   return `<div class="panel" style="padding:24px; display:flex; flex-direction:column; gap:14px;">
-    <div class="muted" style="font-size:20px; text-transform:uppercase; letter-spacing:2px;">🍺 Compteurs (pour la blague)</div>
+    <div class="muted" style="font-size:20px; text-transform:uppercase; letter-spacing:2px;">🍺 Compteurs</div>
     <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px;">
       ${JOKE_COUNTERS.map(([k,label])=>`
         <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px 16px; border-radius:12px; background:var(--head);">
@@ -1132,7 +1136,7 @@ const SCREENS = {
         <span class="alert-btn__label">FAIRE<br>RENTRER<br>LE PILOTE</span>
       </button>
       <div id="netdot" title="Synchro mobile" style="position:absolute; left:44px; top:82px; z-index:4; background:#181510cc; border:1px solid var(--line); border-radius:999px; padding:7px 16px; font-size:22px; color:var(--muted); cursor:pointer;">○ —</div>
-      ${state.sessionCode?`<div style="position:absolute; left:44px; top:130px; z-index:4; background:#181510cc; border:1px solid var(--line); border-radius:14px; padding:10px;">${qrSVG(state.sessionCode,110)}</div>`:''}
+      ${state.sessionCode?`<div style="position:absolute; left:44px; top:130px; z-index:4; background:#181510cc; border:1px solid var(--line); border-radius:16px; padding:14px;">${qrSVG(state.sessionCode,220)}</div>`:''}
       ${body}
       <div class="tab" id="t-stats" style="top:300px;"><span style="font-size:38px;">📊</span><div><div style="font-weight:700;font-size:30px;">Stats</div><div class="mono muted" style="font-size:20px;">[S]</div></div></div>
       <div class="tab" id="t-settings" style="top:444px;"><span style="font-size:38px;">⚙️</span><div><div style="font-weight:700;font-size:30px;">Paramètres</div><div class="mono muted" style="font-size:20px;">[P]</div></div></div>
