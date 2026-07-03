@@ -261,6 +261,7 @@ async function fbInit(force){ try{
   SYNC.db.ref(base+'/laps').on('child_added', s=>{ try{ onLapReceived(s.key, s.val()); }catch(e){} });
   SYNC.db.ref(base+'/alarms').on('child_added', s=>{ try{ onAlarmReceived(s.key, s.val()); }catch(e){} });
   SYNC.db.ref(base+'/rentre_ack').on('value', s=>{ try{ onRentreAck(s.val()); }catch(e){} });
+  SYNC.db.ref(base+'/custom_alert_ack').on('value', s=>{ try{ onCustomAlertAck(s.val()); }catch(e){} });
   fbDoPublish(); updateNetDot();
  }catch(e){ SYNC.ready=false; SYNC.connected=false; SYNC.err=(e&&e.message)?e.message:String(e); console.error('[sync] init échec',e); updateNetDot(); } }
 let pubT=null;
@@ -293,7 +294,8 @@ function fbBuildState(){ const cur=curRelais(); const t=now();
   // et remettre à zéro ses propres chronos — le PC reste maître.
   return { pilote_courant:pilote, roster, relais, course: fin!=null?{fin_ts:fin}:null,
     pause: !!state.pause.active, rentre: state.rentre||{actif:false,relais_id:null,ts:null}, pit_actif:pitActif,
-    race_started_at: state.race.startedAt!=null?Math.round(state.race.startedAt):null, race_over:!!state.raceOver, maj_ts:Math.round(t) }; }
+    race_started_at: state.race.startedAt!=null?Math.round(state.race.startedAt):null, race_over:!!state.raceOver,
+    custom_alert: state.customAlert||{actif:false,id:null,text:null,ts:null}, maj_ts:Math.round(t) }; }
 function onLapReceived(key,val){ if(!val) return; const id=val.id_unique||key; if(state.seenLaps[id]) return; state.seenLaps[id]=true;
   const sec = typeof val.valeur_chrono==='number'? val.valeur_chrono : parseLap(String(val.valeur_chrono||''));
   state.inbox.push({ id, ts:val.timestamp||now(), val:sec, pilote:val.pilote_vu_tel||'', relEst:val.id_relais_estime, pseudo:val.pseudo||'' });
@@ -329,6 +331,10 @@ const DEFAULT = () => ({
     ],
     alerts: { fuel:true, relaisMode:'time', relaisTime:5*60, relaisLaps:3, finish:true },
     sounds: { relais:'strident', finish:'doux', fuel:'feutre', alarm:'sirene' },
+    // Alertes sur mesure définies par l'utilisateur (§ paramètres de course) :
+    // [{id, text, pilotName:null|string ("tous" si null), mode:'time'|'laps'|'clock',
+    //   anchor:'start'|'end', value:number (sec ou tours), clockTime:'HH:MM', scope:'relais'|'race', sound}]
+    customAlerts: [],
   },
   variant: 'A',
   race: { startedAt:null, pausedMs:0 },
@@ -353,6 +359,9 @@ const DEFAULT = () => ({
   seenLaps: {},                 // dédup laps reçus (id_unique -> true)
   seenAlarms: {},               // dédup alarmes reçues
   alarmTel: null,               // alarme téléphone en cours d'affichage
+  customAlertFired: {},         // id d'alerte sur mesure -> déjà déclenchée (reset par relais ou par course selon scope)
+  customAlert: { actif:false, id:null, text:null, ts:null },  // dernière alerte sur mesure envoyée au mobile
+  customAlertDraft: null,       // formulaire d'ajout/édition en cours (Paramètres course)
 });
 let state = load();
 function load(){
@@ -370,6 +379,10 @@ function migrate(s){ const d=DEFAULT(); // compléter les clés manquantes (anci
   if(!s.rentre) s.rentre={actif:false,relais_id:null,ts:null};
   if(!s.inbox) s.inbox=[]; if(!s.seenLaps) s.seenLaps={}; if(!s.seenAlarms) s.seenAlarms={};
   if(s.alarmTel===undefined) s.alarmTel=null;
+  if(!Array.isArray(s.cfg.customAlerts)) s.cfg.customAlerts=[];
+  if(!s.customAlertFired) s.customAlertFired={};
+  if(!s.customAlert) s.customAlert={actif:false,id:null,text:null,ts:null};
+  if(s.customAlertDraft===undefined) s.customAlertDraft=null;
   (s.relais||[]).forEach(r=>{ if(r.pausedMs===undefined) r.pausedMs=0; }); return s;
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(state)); try{ fbPublish(); }catch(e){} }
@@ -500,7 +513,8 @@ function beepFuel(){ playAlertSound('fuel'); }
 
 // ───────────────────────── transitions / actions ─────────────────────────
 function go(phase){ state.phase = phase; save(); render(); }
-function resetRelaisAcks(){ state.ack.relais=false; state.ack.fuel=false; state.rentre={actif:false,relais_id:null,ts:null}; }
+function resetRelaisAcks(){ state.ack.relais=false; state.ack.fuel=false; state.rentre={actif:false,relais_id:null,ts:null};
+  (state.cfg.customAlerts||[]).forEach(a=>{ if(a.scope==='relais') delete state.customAlertFired[a.id]; }); }
 
 // Bouton "Alerter le mobile" : déclenche le même signal que l'alerte
 // automatique de fin de relais, mais à la demande — sans passer par
@@ -521,6 +535,57 @@ function onRentreAck(val){
   state.rentre = { actif:false, relais_id:null, ts:null };
   save(); render();
   toast('✓ Alerte acquittée par le mobile');
+}
+function onCustomAlertAck(val){
+  if(!val || !state.customAlert || !state.customAlert.actif) return;
+  if(val.ts !== state.customAlert.ts) return;
+  state.customAlert = { actif:false, id:null, text:null, ts:null };
+  save(); render();
+  toast('✓ Alerte personnalisée acquittée par le mobile');
+}
+
+// ── Alertes sur mesure : moteur de déclenchement (§ paramètres de course) ──
+function totalRaceLapsDone(){ return state.relais.reduce((n,r)=>n+r.laps.length,0); }
+function customAlertTriggered(a, rRem, cRem){
+  if(a.mode==='clock'){
+    const p=String(a.clockTime||'').split(':').map(Number);
+    if(p.length<2 || p.some(isNaN)) return false;
+    const d=new Date(now()); d.setHours(p[0],p[1],0,0);
+    return now()>=d.getTime();
+  }
+  const relais = a.scope!=='race';
+  const cur = curRelais();
+  if(a.mode==='time'){
+    const elapsed = relais? relaisElapsed() : raceElapsed();
+    const rem = relais? rRem : cRem;
+    return a.anchor==='end' ? rem<=a.value : elapsed>=a.value;
+  }
+  if(a.mode==='laps'){
+    const pace = driverPace(cur.driverIdx);
+    if(relais){
+      if(a.anchor==='end'){ if(!pace) return false; return rRem/pace<=a.value; }
+      return cur.laps.length>=a.value;
+    }
+    if(a.anchor==='end'){ if(!pace) return false; return cRem/pace<=a.value; }
+    return totalRaceLapsDone()>=a.value;
+  }
+  return false;
+}
+function evaluateCustomAlerts(rRem, cRem){
+  const cur=curRelais(); if(!cur) return;
+  const pilote = drivers()[cur.driverIdx].name;
+  for(const a of (state.cfg.customAlerts||[])){
+    if(state.customAlertFired[a.id]) continue;
+    if(a.pilotName && a.pilotName!==pilote) continue;
+    if(customAlertTriggered(a,rRem,cRem)){
+      state.customAlertFired[a.id]=true;
+      state.customAlert={ actif:true, id:a.id, text:a.text, ts:now() };
+      playPresetByName(a.sound||'strident');
+      save(); render();
+      toast('🔔 '+a.text);
+      return; // un seul déclenchement par tick pour ne pas s'écraser en cascade
+    }
+  }
 }
 
 function arm(){ readConfigInputs(); ensureCode(); if(state.cfg.autoArm) go('armed'); else launch(); }   // auto désactivé => départ manuel immédiat
@@ -610,6 +675,103 @@ function strategyRows(){
   }).join('');
 }
 
+// ── Alertes sur mesure : UI (Paramètres course) ──
+function customAlertSummary(a){
+  const who = a.pilotName ? esc(a.pilotName) : 'Tous les pilotes';
+  if(a.mode==='clock') return who+' · à '+esc(a.clockTime||'--:--')+' · une fois';
+  const scope = a.scope==='race' ? 'course entière' : 'chaque relais';
+  const anchor = a.anchor==='end' ? 'avant la fin' : 'après le début';
+  const unit = a.mode==='laps' ? (a.value+' tour'+(a.value>1?'s':'')+' est.') : (Math.round(a.value/60)+' min');
+  return who+' · '+unit+' '+anchor+' · '+scope;
+}
+function syncCustomAlertDraftFromForm(){
+  const d=state.customAlertDraft; if(!d) return;
+  const gv=id=>{ const el=$('#'+id); return el?el.value:undefined; };
+  if(gv('ca-text')!==undefined) d.text=gv('ca-text');
+  if(gv('ca-pilot')!==undefined) d.pilotName=gv('ca-pilot')||null;
+  if(gv('ca-anchor')!==undefined) d.anchor=gv('ca-anchor');
+  if(gv('ca-scope')!==undefined) d.scope=gv('ca-scope');
+  if(gv('ca-sound')!==undefined) d.sound=gv('ca-sound');
+  if(gv('ca-clocktime')!==undefined) d.clockTime=gv('ca-clocktime');
+  if(gv('ca-value')!==undefined){ const rv=Number(gv('ca-value'))||0; d.value = d.mode==='laps'? rv : rv*60; }
+}
+function saveCustomAlertDraft(){
+  syncCustomAlertDraftFromForm();
+  const d=state.customAlertDraft; const text=(d.text||'').trim();
+  if(!text){ toast('Texte de l’alerte requis'); return; }
+  d.text=text;
+  const alert={
+    id: d.id || ('ca_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8)),
+    text: d.text, pilotName: d.pilotName||null, mode: d.mode,
+    anchor: d.mode==='clock'?null:d.anchor,
+    value: d.mode==='clock'?null:d.value,
+    clockTime: d.mode==='clock'?(d.clockTime||'12:00'):null,
+    scope: d.mode==='clock'?'race':d.scope,
+    sound: d.sound||'strident',
+  };
+  const idx=state.cfg.customAlerts.findIndex(x=>x.id===alert.id);
+  if(idx>=0) state.cfg.customAlerts[idx]=alert; else state.cfg.customAlerts.push(alert);
+  delete state.customAlertFired[alert.id];
+  state.customAlertDraft=null; save(); render(); toast('Alerte enregistrée');
+}
+function customAlertsPanel(){
+  const d=state.customAlertDraft;
+  const list=(state.cfg.customAlerts||[]).map(a=>`
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px 14px; border-radius:10px; background:rgba(255,255,255,.04);">
+      <div><div style="font-size:22px; font-weight:600;">${esc(a.text)}</div>
+        <div class="muted" style="font-size:16px;">${customAlertSummary(a)}</div></div>
+      <div style="display:flex; gap:8px;">
+        <button class="mini ca-edit" data-id="${a.id}" title="Modifier">✏️</button>
+        <button class="mini ca-del" data-id="${a.id}" title="Supprimer">✕</button>
+      </div></div>`).join('');
+  const form = d ? `
+    <div class="panel" style="padding:18px 20px; display:flex; flex-direction:column; gap:12px; border-color:var(--accent);">
+      <input class="field" id="ca-text" placeholder="Texte de l’alerte (ex: Vérifier les pneus)" value="${esc(d.text)}" style="font-size:20px; padding:10px 14px;">
+      <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;">
+        <label style="font-size:16px; color:#cfc7b6; display:flex; flex-direction:column; gap:4px;">Pilote concerné
+          <select class="field" id="ca-pilot" style="font-size:18px; padding:8px 10px;">
+            <option value="">Tous les pilotes</option>
+            ${drivers().map(dr=>`<option value="${esc(dr.name)}" ${d.pilotName===dr.name?'selected':''}>${esc(dr.name)}</option>`).join('')}
+          </select></label>
+        <label style="font-size:16px; color:#cfc7b6; display:flex; flex-direction:column; gap:4px;">Déclencheur
+          <select class="field" id="ca-mode" style="font-size:18px; padding:8px 10px;">
+            <option value="time" ${d.mode==='time'?'selected':''}>Temps</option>
+            <option value="laps" ${d.mode==='laps'?'selected':''}>Nb de tours estimé</option>
+            <option value="clock" ${d.mode==='clock'?'selected':''}>Heure fixe</option>
+          </select></label>
+      </div>
+      <div style="display:${d.mode==='clock'?'none':'flex'}; gap:16px; flex-wrap:wrap; align-items:flex-end;">
+        <label style="font-size:16px; color:#cfc7b6; display:flex; flex-direction:column; gap:4px;">Repère
+          <select class="field" id="ca-anchor" style="font-size:18px; padding:8px 10px;">
+            <option value="start" ${d.anchor==='start'?'selected':''}>Après le début</option>
+            <option value="end" ${d.anchor==='end'?'selected':''}>Avant la fin</option>
+          </select></label>
+        <label style="font-size:16px; color:#cfc7b6; display:flex; flex-direction:column; gap:4px;">Valeur (${d.mode==='laps'?'tours':'min'})
+          <input class="field mono" id="ca-value" value="${d.mode==='laps'?d.value:Math.round(d.value/60)}" style="width:90px; font-size:18px; padding:8px 10px;"></label>
+        <label style="font-size:16px; color:#cfc7b6; display:flex; flex-direction:column; gap:4px;">Portée
+          <select class="field" id="ca-scope" style="font-size:18px; padding:8px 10px;">
+            <option value="relais" ${d.scope==='relais'?'selected':''}>Chaque relais</option>
+            <option value="race" ${d.scope==='race'?'selected':''}>Course entière</option>
+          </select></label>
+      </div>
+      <div style="display:${d.mode==='clock'?'flex':'none'}; gap:16px; align-items:flex-end;">
+        <label style="font-size:16px; color:#cfc7b6; display:flex; flex-direction:column; gap:4px;">Heure
+          <input class="field mono" id="ca-clocktime" type="time" value="${esc(d.clockTime||'12:00')}" style="font-size:18px; padding:8px 10px;"></label>
+      </div>
+      <label style="font-size:16px; color:#cfc7b6; display:flex; flex-direction:column; gap:4px; width:fit-content;">Son
+        <select class="field" id="ca-sound" style="font-size:18px; padding:8px 10px;">${soundOptionsHTML(d.sound)}</select></label>
+      <div style="display:flex; gap:10px; margin-top:4px;">
+        <button id="ca-save" style="height:48px; padding:0 24px; border-radius:10px; border:1px solid #3a5a2a; background:#16240f; color:#9fd08a; font-weight:700; font-size:18px; cursor:pointer;">Enregistrer</button>
+        <button id="ca-cancel" style="height:48px; padding:0 20px; border-radius:10px; border:1px solid #322d22; background:#1a1610; color:#8d8472; font-size:18px; cursor:pointer;">Annuler</button>
+      </div>
+    </div>` : `<button id="ca-add" style="height:48px; padding:0 22px; border-radius:10px; align-self:flex-start; border:1px solid var(--border-4); background:var(--card-strong); color:var(--ink); font-size:18px; cursor:pointer;">+ Ajouter une alerte</button>`;
+  return `<div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:12px;">
+    <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Alertes personnalisées</div>
+    ${list||'<div class="muted" style="font-size:18px;">Aucune alerte personnalisée pour l’instant.</div>'}
+    ${form}
+  </div>`;
+}
+
 // incident / chute
 function enterIncident(){ if(state.phase!=='live')return; snapshot();
   const c=curRelais(); if(c){ c.incident=true; c.lapCancelled=true; }   // tour en cours faussé -> annulé
@@ -697,6 +859,7 @@ function tick(){
       if(trig){ state.ack.relais=true; state.rentre={actif:true, relais_id:state.relais.length-1, ts:now()}; beepRelais(); state.alertReturn=state.phase; go('alertR'); return; }
     }
     if(state.cfg.alerts.fuel && !state.ack.fuel && fuelRem()<=FUEL_WARN){ state.ack.fuel=true; beepFuel(); save(); }
+    evaluateCustomAlerts(rRem,cRem);
   }
   if(state.phase==='live') updateLive();
   if(state.phase==='laps') updateLapsProgress();
@@ -1241,6 +1404,7 @@ const SCREENS = {
               ${customSounds[k]?`<button class="btn" data-sound-clear="${k}" title="Retirer le fichier perso" style="height:48px; width:48px; padding:0; font-size:20px; border-radius:12px;">✕</button>`:''}
             </div></div>`).join('')}
         </div>
+        ${customAlertsPanel()}
         <div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:12px;">
           <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Stratégie de relais — ordre &amp; pilotes actifs</div>
           ${strategyRows()}
@@ -1380,6 +1544,21 @@ function wire(){
     }));
     document.querySelectorAll('[data-sound-clear]').forEach(btn=>btn.addEventListener('click',()=>{
       clearCustomSound(btn.dataset.soundClear); render(); toast('Fichier audio retiré, retour au son intégré'); }));
+    on('ca-add','click',()=>{ state.customAlertDraft={ id:null, text:'', pilotName:null, mode:'time', anchor:'start', value:5*60, clockTime:'12:00', scope:'relais', sound:'strident' }; render(); });
+    on('ca-cancel','click',()=>{ state.customAlertDraft=null; render(); });
+    on('ca-save','click',saveCustomAlertDraft);
+    document.querySelectorAll('.ca-edit').forEach(btn=>btn.addEventListener('click',()=>{
+      const a=state.cfg.customAlerts.find(x=>x.id===btn.dataset.id); if(a) state.customAlertDraft=Object.assign({},a); render(); }));
+    document.querySelectorAll('.ca-del').forEach(btn=>btn.addEventListener('click',()=>{
+      const id=btn.dataset.id; state.cfg.customAlerts=state.cfg.customAlerts.filter(x=>x.id!==id); delete state.customAlertFired[id];
+      if(state.customAlertDraft&&state.customAlertDraft.id===id) state.customAlertDraft=null;
+      save(); render(); toast('Alerte supprimée'); }));
+    const cam=$('#ca-mode'); if(cam) cam.addEventListener('change',()=>{
+      syncCustomAlertDraftFromForm();
+      const oldMode=state.customAlertDraft.mode, newMode=cam.value;
+      // temps <-> tours : la valeur brute n'a plus le même sens, on remet un défaut raisonnable
+      if(oldMode!==newMode && oldMode!=='clock' && newMode!=='clock') state.customAlertDraft.value = newMode==='laps' ? 3 : 5*60;
+      state.customAlertDraft.mode=newMode; render(); });
     // synchro mobile
     const ns=$('#netstat'); if(ns){ const s=netState(); ns.innerHTML='<span style="color:'+s.c+'">'+s.d+'</span> '+s.t; }
     const applyVer=()=>{ const v=$('#fb-ver'); if(v&&v.value.trim()){ FB_VER=v.value.trim(); localStorage.setItem('endu.fbver',FB_VER); } };

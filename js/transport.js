@@ -143,6 +143,14 @@ export async function pushRentreAck(idCourse, ts) {
   await firebaseModules.set(firebaseModules.ref(db, `sessions/${idCourse}/rentre_ack`), { ts });
 }
 
+// Acks a PC-defined custom alert, same round-trip pattern as pushRentreAck.
+export async function pushCustomAlertAck(idCourse, ts) {
+  if (!idCourse) throw new Error('Pas de course appairée.');
+  const db = await ensureConnected();
+  if (!db) throw new Error('Relais indisponible.');
+  await firebaseModules.set(firebaseModules.ref(db, `sessions/${idCourse}/custom_alert_ack`), { ts });
+}
+
 // Returns an unsubscribe function. Silently no-ops if unconfigured.
 export function listenAlarmAck(idCourse, idUnique, cb) {
   let liveUnsub = null;

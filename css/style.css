@@ -256,6 +256,26 @@ button, input, textarea { font-family: inherit; }
   color: #fff;
 }
 
+.custom-alert-banner {
+  flex: none;
+  padding: 14px 16px;
+  background: var(--amber);
+  cursor: pointer;
+  animation: bpPulse 1.4s ease-in-out infinite;
+  box-shadow: 0 8px 24px -6px rgba(245,166,35,.6);
+}
+.custom-alert-banner__row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-weight: 900;
+  font-size: 21px;
+  letter-spacing: .02em;
+  color: #1a1408;
+  text-align: center;
+}
+
 .content-scroll {
   flex: 1;
   overflow-y: auto;
@@ -1082,6 +1102,44 @@ textarea.field { resize: none; }
   font-weight: 900;
   font-size: 24px;
   color: var(--red-overlay-ink);
+  cursor: pointer;
+  box-shadow: 0 14px 40px rgba(0,0,0,.35);
+}
+
+/* Fullscreen alerte personnalisée : distincte du rouge d'urgence (rentre),
+   un ambre/or fixe (pas de flash) puisqu'il s'agit d'un rappel défini par
+   l'utilisateur, pas forcément d'une urgence sécurité. */
+.custom-alert-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  text-align: center;
+  background: linear-gradient(160deg, #f5a623, #d1540a);
+}
+.custom-alert-overlay.hidden { display: none; }
+.custom-alert-overlay__icon { font-size: 66px; margin-bottom: 8px; }
+.custom-alert-overlay__title {
+  font-weight: 900;
+  font-size: 40px;
+  line-height: 1.1;
+  color: #fff;
+  text-shadow: 0 4px 20px rgba(0,0,0,.35);
+  max-width: 340px;
+}
+.custom-alert-overlay__ok {
+  margin-top: 40px;
+  padding: 20px 52px;
+  background: #fff;
+  border: none;
+  border-radius: 16px;
+  font-weight: 900;
+  font-size: 24px;
+  color: #a03d00;
   cursor: pointer;
   box-shadow: 0 14px 40px rgba(0,0,0,.35);
 }

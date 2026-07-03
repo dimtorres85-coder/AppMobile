@@ -58,6 +58,10 @@
     <div class="rentre-banner__row"><span>🚩</span><span>FAIRE RENTRER LE PILOTE</span></div>
   </div>
 
+  <div id="custom-alert-banner" class="custom-alert-banner hidden">
+    <div class="custom-alert-banner__row"><span>🔔</span><span id="custom-alert-banner-text"></span></div>
+  </div>
+
   <div class="content-scroll">
 
     <!-- ===== PAGE : ACCUEIL ===== -->
@@ -164,6 +168,19 @@
               <option value="simple">Simple (bip unique)</option>
             </select>
             <button id="sound-alarm-ack-test" type="button" class="sound-row__test">🔊</button>
+          </div>
+        </div>
+        <div class="sound-row">
+          <span class="sound-row__label">Alerte personnalisée (PC)</span>
+          <div class="sound-row__controls">
+            <select id="sound-custom-alert" class="field sound-row__select">
+              <option value="strident">Strident (bips carrés)</option>
+              <option value="sirene">Sirène (dents de scie)</option>
+              <option value="doux">Doux (notes montantes)</option>
+              <option value="feutre">Feutré (double bip)</option>
+              <option value="simple">Simple (bip unique)</option>
+            </select>
+            <button id="sound-custom-alert-test" type="button" class="sound-row__test">🔊</button>
           </div>
         </div>
       </div>
@@ -338,6 +355,13 @@
   <div class="rentre-overlay__title">FAIRE RENTRER<br>LE PILOTE</div>
   <div class="rentre-overlay__sub">Fais signe au pilote de rentrer au stand.</div>
   <button id="rentre-overlay-ok" type="button" class="rentre-overlay__ok">OK, VU</button>
+</div>
+
+<!-- Fullscreen alerte personnalisée (texte libre défini côté PC) -->
+<div id="custom-alert-overlay" class="custom-alert-overlay hidden">
+  <div class="custom-alert-overlay__icon">🔔</div>
+  <div id="custom-alert-overlay-text" class="custom-alert-overlay__title"></div>
+  <button id="custom-alert-overlay-ok" type="button" class="custom-alert-overlay__ok">OK, VU</button>
 </div>
 
 <!-- Fullscreen fin de course (miroir de l'écran "finish" du PC) -->

@@ -8,6 +8,7 @@ let currentPage = 'accueil';
 let confirmCallback = null;
 let pairingEditMode = false;
 let lastFlashedRentreTs = null;
+let lastFlashedCustomAlertTs = null;
 let raceOverSignaled = false;
 let raceOverDismissed = false;
 let alarmStatusAutoHideTimer = null;
@@ -120,6 +121,12 @@ const el = {
   rentreOverlay: document.getElementById('rentre-overlay'),
   rentreOverlayOk: document.getElementById('rentre-overlay-ok'),
 
+  customAlertBanner: document.getElementById('custom-alert-banner'),
+  customAlertBannerText: document.getElementById('custom-alert-banner-text'),
+  customAlertOverlay: document.getElementById('custom-alert-overlay'),
+  customAlertOverlayText: document.getElementById('custom-alert-overlay-text'),
+  customAlertOverlayOk: document.getElementById('custom-alert-overlay-ok'),
+
   finishOverlay: document.getElementById('finish-overlay'),
   finishOverlayOk: document.getElementById('finish-overlay-ok'),
 
@@ -142,6 +149,8 @@ const el = {
   soundFinishTest: document.getElementById('sound-finish-test'),
   soundAlarmAck: document.getElementById('sound-alarm-ack'),
   soundAlarmAckTest: document.getElementById('sound-alarm-ack-test'),
+  soundCustomAlert: document.getElementById('sound-custom-alert'),
+  soundCustomAlertTest: document.getElementById('sound-custom-alert-test'),
 };
 
 function persist() {
@@ -338,6 +347,7 @@ function resetSession() {
   alarmAckUnsubscribes.forEach((unsub) => unsub());
   alarmAckUnsubscribes.clear();
   lastFlashedRentreTs = null;
+  lastFlashedCustomAlertTs = null;
   clearTimeout(alarmStatusAutoHideTimer);
   alarmStatusScheduledForId = null;
   alarmStatusDismissedForId = null;
@@ -653,12 +663,14 @@ function onPcState(raw) {
   }
   state.pc_pit_actif = pitActif;
   state.pc_race_over = !!raw.race_over;
+  state.custom_alert = raw.custom_alert || null;
 
   state.pc_state_recv_ts = now();
   persist();
   render();
   maybeSignalRentre();
   maybeSignalRaceOver();
+  maybeSignalCustomAlert();
 }
 
 // ---- Lap send queue (§16.6) — idempotent by id_unique, USB/relay coexist ----
@@ -853,6 +865,7 @@ function render() {
   el.soundRentre.value = state.sound_prefs.rentre;
   el.soundFinish.value = state.sound_prefs.finish;
   el.soundAlarmAck.value = state.sound_prefs.alarm_ack;
+  el.soundCustomAlert.value = state.sound_prefs.custom_alert;
 
   const needsPseudo = !state.pseudo;
   el.pseudoOverlay.classList.toggle('hidden', !needsPseudo);
@@ -1190,6 +1203,41 @@ function ackRentre() {
   if (state.id_course) transport.pushRentreAck(state.id_course, r.ts).catch(() => {});
 }
 
+// Same pattern as isRentreActive/maybeSignalRentre/ackRentre, but for a
+// PC-defined custom alert with free text instead of the fixed "rentre" one.
+function isCustomAlertActive() {
+  const a = state.custom_alert;
+  return !!(a && a.actif && a.ts !== state.custom_alert_acked_ts);
+}
+
+function maybeSignalCustomAlert() {
+  if (!isCustomAlertActive()) {
+    el.customAlertBanner.classList.add('hidden');
+    return;
+  }
+  const a = state.custom_alert;
+  el.customAlertBanner.classList.remove('hidden');
+  el.customAlertBannerText.textContent = a.text;
+  if (a.ts !== lastFlashedCustomAlertTs) {
+    lastFlashedCustomAlertTs = a.ts;
+    el.customAlertOverlayText.textContent = a.text;
+    el.customAlertOverlay.classList.remove('hidden');
+    playPreset(state.sound_prefs.custom_alert);
+    vibrate([200, 100, 200, 100, 400]);
+    notifyBackground('Alerte du PC', a.text);
+  }
+}
+
+function ackCustomAlert() {
+  const a = state.custom_alert;
+  if (!a || !a.actif) return;
+  state.custom_alert_acked_ts = a.ts;
+  persist();
+  el.customAlertOverlay.classList.add('hidden');
+  maybeSignalCustomAlert();
+  if (state.id_course) transport.pushCustomAlertAck(state.id_course, a.ts).catch(() => {});
+}
+
 // Mirrors the PC's "finish" screen (course terminée). No ack round-trip to
 // the PC needed here — it's purely informational, dismissed locally, and
 // re-armed whenever resetLocalRecordingFromPc() detects a new race attempt.
@@ -1366,6 +1414,12 @@ el.soundAlarmAck.addEventListener('change', () => {
   playPreset(state.sound_prefs.alarm_ack);
 });
 el.soundAlarmAckTest.addEventListener('click', () => playPreset(state.sound_prefs.alarm_ack));
+el.soundCustomAlert.addEventListener('change', () => {
+  state.sound_prefs.custom_alert = el.soundCustomAlert.value;
+  persist();
+  playPreset(state.sound_prefs.custom_alert);
+});
+el.soundCustomAlertTest.addEventListener('click', () => playPreset(state.sound_prefs.custom_alert));
 
 el.tourBtn.addEventListener('click', handleTourPress);
 el.undoBtn.addEventListener('click', undoLastLap);
@@ -1420,6 +1474,7 @@ el.alarmBtn.addEventListener('pointerdown', startAlarmHold);
 
 el.rentreOverlayOk.addEventListener('click', ackRentre);
 el.finishOverlayOk.addEventListener('click', ackRaceOver);
+el.customAlertOverlayOk.addEventListener('click', ackCustomAlert);
 
 el.pseudoForm.addEventListener('submit', (e) => {
   e.preventDefault();
@@ -1430,6 +1485,7 @@ el.pseudoForm.addEventListener('submit', (e) => {
   render();
 });
 el.rentreBanner.addEventListener('click', () => el.rentreOverlay.classList.remove('hidden'));
+el.customAlertBanner.addEventListener('click', () => el.customAlertOverlay.classList.remove('hidden'));
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {

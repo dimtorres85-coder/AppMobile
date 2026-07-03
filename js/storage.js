@@ -62,13 +62,17 @@ export function createDefaultState() {
     // soon as the user taps OK without waiting for the PC round-trip.
     rentre_acked_ts: null,
 
+    // PC-defined custom alert (free text) — same shape/ack pattern as rentre.
+    custom_alert: null,
+    custom_alert_acked_ts: null,
+
     // Display preference (device-local, not synced).
     nav_position: 'left',
     // 'light' (par défaut, lisible en plein soleil) ou 'dark' (stand/nuit).
     theme: 'light',
     // Sound preset per alert type (device-local, not synced — each phone
     // picks whatever cuts through its own trackside noise best).
-    sound_prefs: { rentre: 'strident', finish: 'doux', alarm_ack: 'simple' },
+    sound_prefs: { rentre: 'strident', finish: 'doux', alarm_ack: 'simple', custom_alert: 'sirene' },
   };
 }
 
