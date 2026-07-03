@@ -370,6 +370,9 @@ const DEFAULT = () => ({
   customAlertFired: {},         // id d'alerte sur mesure -> déjà déclenchée (reset par relais ou par course selon scope)
   customAlert: { actif:false, id:null, text:null, ts:null },  // dernière alerte sur mesure envoyée au mobile
   customAlertDraft: null,       // formulaire d'ajout/édition en cours (Paramètres course)
+  statsView: 'table',           // 'table' | 'graph' — écran Statistiques
+  statsTab: null,               // onglet actif en mode graphique : 'd0','d1',... ou 'pit'
+  jokeCounters: {},             // compteurs manuels pour la blague (clé -> nombre)
 });
 let state = load();
 function load(){
@@ -391,6 +394,9 @@ function migrate(s){ const d=DEFAULT(); // compléter les clés manquantes (anci
   if(!s.customAlertFired) s.customAlertFired={};
   if(!s.customAlert) s.customAlert={actif:false,id:null,text:null,ts:null};
   if(s.customAlertDraft===undefined) s.customAlertDraft=null;
+  if(s.statsView===undefined) s.statsView='table';
+  if(s.statsTab===undefined) s.statsTab=null;
+  if(!s.jokeCounters) s.jokeCounters={};
   (s.relais||[]).forEach(r=>{ if(r.pausedMs===undefined) r.pausedMs=0; }); return s;
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(state)); try{ fbPublish(); }catch(e){} }
@@ -452,6 +458,116 @@ function computeStats(){
 function pitRows(){ return state.pitHistory.map(p=>({ at:p.at,
   label:(drivers()[p.fromIdx]?drivers()[p.fromIdx].name:'?')+' → '+(drivers()[p.toIdx]?drivers()[p.toIdx].name:'?'),
   durationSec:p.durationSec, crash:!!p.crash })); }
+
+// ── Statistiques détaillées + graphiques (écran Statistiques, onglet « Graphique ») ──
+// Petits graphiques SVG maison (pas de dépendance externe, cohérent avec le
+// reste de l'appli — QR codes, icônes — déjà générés en SVG à la main).
+function svgLineChart(values,opts){
+  opts=opts||{}; const w=opts.width||900,h=opts.height||180,pad=20;
+  if(!values.length) return `<div class="muted" style="padding:30px;text-align:center;font-size:20px;">Pas encore de données.</div>`;
+  const min=Math.min(...values),max=Math.max(...values); const range=(max-min)||1;
+  const stepX = values.length>1 ? (w-2*pad)/(values.length-1) : 0;
+  const pts = values.map((v,i)=>[pad+i*stepX, h-pad-((v-min)/range)*(h-2*pad)]);
+  const path = pts.map((p,i)=>(i===0?'M':'L')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  const dots = pts.map(p=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="4" fill="${opts.color||'#f5a623'}"/>`).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%; height:${h}px; display:block;">
+    <path d="${path}" fill="none" stroke="${opts.color||'#f5a623'}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+    ${dots}</svg>`;
+}
+function svgBarChart(values,opts){
+  opts=opts||{}; const w=opts.width||900,h=opts.height||180,pad=20;
+  if(!values.length) return `<div class="muted" style="padding:30px;text-align:center;font-size:20px;">Pas encore de données.</div>`;
+  const max=Math.max(...values)||1; const n=values.length;
+  const slot=(w-2*pad)/n, bw=slot*0.6, gap=slot*0.4;
+  const bars=values.map((v,i)=>{ const bh=(v/max)*(h-2*pad); const x=pad+i*slot+gap/2; const y=h-pad-bh;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(1,bh).toFixed(1)}" fill="${opts.color||'#f5a623'}" rx="3"/>`; }).join('');
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%; height:${h}px; display:block;">${bars}</svg>`;
+}
+function statTile(label,value){
+  return `<div class="panel" style="padding:18px 20px; display:flex; flex-direction:column; gap:6px;">
+    <div class="muted" style="font-size:16px; text-transform:uppercase; letter-spacing:1px;">${label}</div>
+    <div class="mono" style="font-weight:800; font-size:34px;">${value}</div></div>`;
+}
+// Détail complet d'un pilote pour l'onglet graphique : chronos dans l'ordre,
+// temps par relais, allure/régularité, tours estimés, arrêts, chutes, repos.
+function computeDriverDetail(idx){
+  const d=drivers()[idx]; const relaisForDriver=[]; const lapsFlat=[]; const timePerRelais=[];
+  state.relais.forEach((r,i)=>{ if(r.driverIdx!==idx) return; relaisForDriver.push(r);
+    timePerRelais.push(relaisDur(r)); r.laps.forEach(v=>lapsFlat.push(v)); });
+  const totalSec = relaisForDriver.reduce((a,r)=>a+relaisDur(r),0);
+  const best = lapsFlat.length? Math.min(...lapsFlat) : null;
+  const avg = lapsFlat.length? lapsFlat.reduce((a,b)=>a+b,0)/lapsFlat.length : null;
+  const reg = (lapsFlat.length && avg!=null) ? Math.sqrt(lapsFlat.reduce((a,b)=>a+(b-avg)*(b-avg),0)/lapsFlat.length) : null;
+  const pace = driverPace(idx);
+  const estimatedLaps = pace ? Math.round(totalSec/pace) : lapsFlat.length;
+  const stops = state.pitHistory.filter(p=>p.fromIdx===idx).length;
+  const crashes = relaisForDriver.filter(r=>r.incident).length;
+  const raceElapsedSoFar = state.race.startedAt!=null ? Math.max(0,raceElapsed()) : 0;
+  const restSec = Math.max(0, raceElapsedSoFar-totalSec);
+  return { name:d.name, relaisCount:relaisForDriver.length, timePerRelais, lapsFlat, best, avg, reg, estimatedLaps, stops, crashes, totalSec, restSec };
+}
+function statsDriverTab(idx){
+  const det=computeDriverDetail(idx);
+  return `<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+      <div class="panel" style="padding:24px;">
+        <div class="muted" style="font-size:20px; text-transform:uppercase; letter-spacing:2px; margin-bottom:14px;">Évolution du chrono</div>
+        ${svgLineChart(det.lapsFlat,{color:'#5fd06f',height:200})}</div>
+      <div class="panel" style="padding:24px;">
+        <div class="muted" style="font-size:20px; text-transform:uppercase; letter-spacing:2px; margin-bottom:14px;">Temps sur la moto par relais</div>
+        ${svgBarChart(det.timePerRelais,{color:'#f5a623',height:200})}</div>
+    </div>
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:16px;">
+      ${statTile('Tours estimés réalisés', det.estimatedLaps)}
+      ${statTile('Coéf. de régularité', det.reg!=null?('±'+det.reg.toFixed(1)+'s'):'—')}
+      ${statTile('Nombre d’arrêts', det.stops)}
+      ${statTile('Nombre de chutes', det.crashes)}
+      ${statTile('Temps sur la moto (total)', fmt(det.totalSec))}
+      ${statTile('Temps de repos au stand', fmt(det.restSec))}
+    </div>`;
+}
+function statsPitTab(){
+  const pits=pitRows().filter(p=>!p.crash&&p.durationSec!=null);
+  return `<div class="panel" style="padding:24px;">
+      <div class="muted" style="font-size:20px; text-transform:uppercase; letter-spacing:2px; margin-bottom:14px;">Évolution du temps passé au stand</div>
+      ${svgLineChart(pits.map(p=>p.durationSec),{color:'#ff6a12',height:220})}</div>
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:16px;">
+      ${statTile('Nombre total de pit stop', state.pitHistory.length)}
+    </div>`;
+}
+function statsGraphView(){
+  const ds=drivers(); const tabs=ds.map((d,i)=>({key:'d'+i,label:d.name})).concat([{key:'pit',label:'🔧 Pit Stop'}]);
+  const cur = tabs.some(t=>t.key===state.statsTab) ? state.statsTab : tabs[0].key;
+  const tabsHTML = tabs.map(t=>`<button class="stg-tab${cur===t.key?' current':''}" data-tab="${t.key}"
+    style="padding:12px 22px; border-radius:12px; border:1px solid ${cur===t.key?'var(--accent)':'var(--line)'}; background:${cur===t.key?'#2a2110':'#1a1610'}; color:${cur===t.key?'var(--accent)':'var(--ink)'}; font-size:20px; font-weight:700; cursor:pointer;">${esc(t.label)}</button>`).join('');
+  const body = cur==='pit' ? statsPitTab() : statsDriverTab(Number(cur.slice(1)));
+  return `<div style="display:flex; flex-direction:column; gap:20px; flex:1; min-height:0;">
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">${tabsHTML}</div>
+    <div style="display:flex; flex-direction:column; gap:20px; overflow:auto;">${body}${jokeCountersPanel()}</div>
+  </div>`;
+}
+// Compteurs manuels pour la blague — sans rapport avec la course, juste pour
+// s'amuser en équipe pendant les 24h.
+const JOKE_COUNTERS = [
+  ['femmes_percutees', '🚴‍♀️💥 Nombre de femmes percutées'],
+  ['bieres_veille', '🍺 Bières bues la veille'],
+  ['propose_biere', '🍻 Fois où j’ai proposé une bière au collègue'],
+  ['envie_biere', '😋 Fois où j’ai eu envie d’une bière'],
+  ['biere_dans_eau', '💧🍺 Fois où j’ai cru qu’une bière allait couler en buvant de l’eau'],
+];
+function jokeCountersPanel(){
+  return `<div class="panel" style="padding:24px; display:flex; flex-direction:column; gap:14px;">
+    <div class="muted" style="font-size:20px; text-transform:uppercase; letter-spacing:2px;">🍺 Compteurs (pour la blague)</div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px;">
+      ${JOKE_COUNTERS.map(([k,label])=>`
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:14px 16px; border-radius:12px; background:var(--head);">
+          <span style="font-size:18px; flex:1;">${label}</span>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <button class="mini joke-dec" data-k="${k}" title="Moins">−</button>
+            <span class="mono" style="font-size:26px; font-weight:800; min-width:36px; text-align:center;">${state.jokeCounters[k]||0}</span>
+            <button class="mini joke-inc" data-k="${k}" title="Plus">+</button>
+          </div></div>`).join('')}
+    </div></div>`;
+}
 // tours réalisés (estimés) = somme, par relais, de (temps piloté ÷ allure moyenne
 // du pilote). Projection = réalisés + (temps restant ÷ allure du pilote en cours).
 function projection(){
@@ -1255,14 +1371,20 @@ const SCREENS = {
     const known=realPits.filter(p=>p.durationSec!=null); const hasUnknown=realPits.some(p=>p.durationSec==null);
     const pitAvg=known.length? known.reduce((a,b)=>a+b.durationSec,0)/known.length : null;
     const regColor=r=> r==null?'var(--muted)': r<1?'var(--green)': r<1.6?'var(--accent)':'#f5a623';
+    const graphMode = state.statsView==='graph';
     return `<div class="screen" style="display:flex; justify-content:flex-end;">
       <div id="st-close-bg" style="flex:1; background:rgba(8,7,4,.6); cursor:pointer;"></div>
       <div style="width:1500px; background:#13110b; border-left:1px solid var(--line); padding:48px 60px; display:flex; flex-direction:column; gap:26px; overflow:auto;">
         <div style="display:flex; align-items:flex-end; justify-content:space-between; border-bottom:2px solid var(--line); padding-bottom:18px;">
           <div class="h1" style="font-size:54px;">Statistiques</div>
-          <div style="display:flex; gap:18px; align-items:center;">
+          <div style="display:flex; gap:14px; align-items:center;">
+            <div style="display:flex; gap:8px; background:#1a1610; border-radius:12px; padding:4px;">
+              <button id="st-view-table" style="height:52px; padding:0 20px; border-radius:9px; border:none; font-size:20px; font-weight:700; cursor:pointer; background:${graphMode?'transparent':'var(--accent)'}; color:${graphMode?'var(--muted)':'#1a1408'};">Tableau</button>
+              <button id="st-view-graph" style="height:52px; padding:0 20px; border-radius:9px; border:none; font-size:20px; font-weight:700; cursor:pointer; background:${graphMode?'var(--accent)':'transparent'}; color:${graphMode?'#1a1408':'var(--muted)'};">📊 Graphique</button>
+            </div>
             <button class="btn" id="st-csv" style="height:62px; padding:0 28px; font-size:24px; border-radius:12px;">⬇ Export CSV</button>
             <div class="muted mono" id="st-close" style="font-size:26px; cursor:pointer;">Fermer [Échap]</div></div></div>
+        ${graphMode ? statsGraphView() : `
         <div class="tbl">
           <div style="display:grid; grid-template-columns:1.4fr 1fr .7fr 1fr 1fr 1fr; background:var(--head); color:var(--muted); font-size:19px; font-weight:700; text-transform:uppercase; letter-spacing:.5px;">
             <div style="padding:14px 22px;">Pilote</div><div style="padding:14px 22px;">Temps piloté</div><div style="padding:14px 22px;">Relais</div><div style="padding:14px 22px;">Meilleur tour</div><div style="padding:14px 22px;">Moyenne</div><div style="padding:14px 22px;">Régularité</div></div>
@@ -1301,7 +1423,7 @@ const SCREENS = {
               <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Tours réalisés</div>
               <div style="display:flex; align-items:baseline; gap:14px;"><span class="mono" style="font-weight:800; font-size:90px;">${pr.done}</span><span class="muted" style="font-size:26px;">sur ${pr.proj!=null?pr.proj:'—'}</span></div></div>
           </div>
-        </div>
+        </div>`}
       </div></div>`;
   },
 
@@ -1526,7 +1648,13 @@ function wire(){
   document.querySelectorAll('.strat-up').forEach(b=>b.addEventListener('click',()=>moveDriverUp(+b.dataset.i)));
   document.querySelectorAll('.strat-toggle').forEach(b=>b.addEventListener('click',()=>toggleDriverActive(+b.dataset.i)));
   if(ph==='stats'){ const back=()=>go(state.statsReturn||'live'); on('st-close','click',back); on('st-close-bg','click',back); on('st-csv','click',exportCSV);
-    document.querySelectorAll('.pit-edit').forEach(inp=>inp.addEventListener('change',()=>editPit(+inp.dataset.k, inp.value))); }
+    document.querySelectorAll('.pit-edit').forEach(inp=>inp.addEventListener('change',()=>editPit(+inp.dataset.k, inp.value)));
+    on('st-view-table','click',()=>{ state.statsView='table'; save(); render(); });
+    on('st-view-graph','click',()=>{ state.statsView='graph'; save(); render(); });
+    document.querySelectorAll('.stg-tab').forEach(b=>b.addEventListener('click',()=>{ state.statsTab=b.dataset.tab; save(); render(); }));
+    document.querySelectorAll('.joke-inc').forEach(b=>b.addEventListener('click',()=>{ const k=b.dataset.k; state.jokeCounters[k]=(state.jokeCounters[k]||0)+1; save(); render(); }));
+    document.querySelectorAll('.joke-dec').forEach(b=>b.addEventListener('click',()=>{ const k=b.dataset.k; state.jokeCounters[k]=Math.max(0,(state.jokeCounters[k]||0)-1); save(); render(); }));
+  }
   if(ph==='settings'){
     on('se-close','click',()=>go('live'));
     on('se-stop','click',abandonClick);                       // arrêter = abandonner (farceur)
