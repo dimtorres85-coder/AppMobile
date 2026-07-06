@@ -373,6 +373,7 @@ const DEFAULT = () => ({
   statsView: 'table',           // 'table' | 'graph' — écran Statistiques
   statsTab: null,               // onglet actif en mode graphique : 'd0','d1',... ou 'pit'
   jokeCounters: {},             // compteurs manuels pour la blague (clé -> nombre)
+  settingsTab: 'general',       // onglet actif dans Paramètres : 'general'|'course'|'alertes'|'strategie'
 });
 let state = load();
 function load(){
@@ -397,6 +398,7 @@ function migrate(s){ const d=DEFAULT(); // compléter les clés manquantes (anci
   if(s.statsView===undefined) s.statsView='table';
   if(s.statsTab===undefined) s.statsTab=null;
   if(!s.jokeCounters) s.jokeCounters={};
+  if(!s.settingsTab) s.settingsTab='general';
   (s.relais||[]).forEach(r=>{ if(r.pausedMs===undefined) r.pausedMs=0; }); return s;
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(state)); try{ fbPublish(); }catch(e){} }
@@ -635,6 +637,19 @@ function playAlertSound(key){
   if(customSounds[key]){ try{ new Audio(customSounds[key]).play().catch(()=>{}); return; }catch(e){} }
   playPresetByName(state.cfg.sounds[key]);
 }
+
+// Alertes personnalisées : une par pilote/déclencheur possible, donc pas de
+// clé fixe comme ci-dessus — indexé par l'id de l'alerte, même stockage à
+// part de `state` pour la même raison (éviter d'alourdir save()).
+const CA_SOUND_PREFIX='endu.sound.ca.';
+function caCustomSound(id){ if(!id) return null; try{ return localStorage.getItem(CA_SOUND_PREFIX+id); }catch(e){ return null; } }
+function setCaCustomSound(id,dataUrl){ try{ localStorage.setItem(CA_SOUND_PREFIX+id,dataUrl); }catch(e){ toast('⚠ Fichier trop volumineux pour être sauvegardé dans le navigateur'); } }
+function clearCaCustomSound(id){ try{ localStorage.removeItem(CA_SOUND_PREFIX+id); }catch(e){} }
+function playCaSound(id,fallbackPreset){
+  const cs=caCustomSound(id);
+  if(cs){ try{ new Audio(cs).play().catch(()=>{}); return; }catch(e){} }
+  playPresetByName(fallbackPreset||'strident');
+}
 function beepRelais(){ playAlertSound('relais'); }       // strident, urgent
 function beepFinish(){ playAlertSound('finish'); } // festif
 function beepFuel(){ playAlertSound('fuel'); }
@@ -711,7 +726,7 @@ function evaluateCustomAlerts(rRem, cRem){
     if(customAlertTriggered(a,rRem,cRem)){
       state.customAlertFired[a.id]=true;
       state.customAlert={ actif:true, id:a.id, text:a.text, ts:now() };
-      playPresetByName(a.sound||'strident');
+      playCaSound(a.id,a.sound);
       save(); render();
       toast('🔔 '+a.text);
       return; // un seul déclenchement par tick pour ne pas s'écraser en cascade
@@ -806,6 +821,174 @@ function strategyRows(){
   }).join('');
 }
 
+// ── Stratégie automatique : projection de la rotation des relais ──
+const STRATEGY_COLORS=['#f5a623','#5fd06f','#4aa3e0','#e05c8a','#b98cf2','#e0c34a','#e0673f','#4ad0b0'];
+function strategyColor(i){ return STRATEGY_COLORS[i%STRATEGY_COLORS.length]; }
+// Simule la rotation (même règle que la vraie course : pilotes actifs dans
+// l'ordre de state.cfg.drivers, en boucle, chacun roulant jusqu'à son temps
+// de relais max) pour projeter qui roulera quand — utilisable dès la
+// configuration, avant même le départ de la course.
+function computeStrategy(){
+  const ds=drivers(); const totalSec=state.cfg.durationSec;
+  const activeCount=ds.filter(d=>d.active!==false).length;
+  if(!activeCount || !totalSec) return { segments:[], totalSec:totalSec||0 };
+  let idx=nextActiveDriver(-1); let elapsed=0; const segments=[]; let guard=0;
+  while(elapsed<totalSec && guard<1000){
+    guard++;
+    const d=ds[idx]; const maxSec=d.max||40*60; const dur=Math.min(maxSec, totalSec-elapsed);
+    const pace=driverPace(idx); const laps=pace? Math.round(dur/pace) : null;
+    segments.push({ idx, name:d.name, startSec:elapsed, durSec:dur, laps });
+    elapsed+=dur; idx=nextActiveDriver(idx);
+  }
+  return { segments, totalSec };
+}
+function strategyBarSVG(){
+  const { segments, totalSec } = computeStrategy();
+  if(!segments.length) return `<div class="muted" style="padding:30px; text-align:center; font-size:20px;">Renseigne au moins un pilote actif, son temps de relais max et la durée de course.</div>`;
+  const w=1400, h=120;
+  const defs=[];
+  const segRects=segments.map((s,i)=>{
+    const x=(s.startSec/totalSec)*w; const width=(s.durSec/totalSec)*w; const color=strategyColor(s.idx);
+    const rw=Math.max(0,width-1.5);
+    // Un texte plus long que son segment déborderait sur le voisin — on le
+    // rogne strictement aux bords du rectangle via un clip-path dédié.
+    const clipId='strat-clip-'+i;
+    defs.push(`<clipPath id="${clipId}"><rect x="${x.toFixed(1)}" y="0" width="${rw.toFixed(1)}" height="${h}"/></clipPath>`);
+    const durLabel=Math.round(s.durSec/60)+' min';
+    const label = width>55 ? `<g clip-path="url(#${clipId})">
+        <text x="${(x+width/2).toFixed(1)}" y="${(h/2-6).toFixed(1)}" text-anchor="middle" font-size="18" font-weight="800" fill="#1a1408">${esc(s.name)}</text>
+        <text x="${(x+width/2).toFixed(1)}" y="${(h/2+18).toFixed(1)}" text-anchor="middle" font-size="15" font-weight="600" fill="#1a1408">${durLabel}${s.laps!=null?' · ~'+s.laps+' t.':''}</text>
+      </g>` : '';
+    return `<rect x="${x.toFixed(1)}" y="0" width="${rw.toFixed(1)}" height="${h}" fill="${color}" rx="4"/>${label}`;
+  }).join('');
+  const step=15*60; const lines=[];
+  for(let t=step; t<totalSec; t+=step){
+    const x=(t/totalSec)*w; const isHour = t%3600===0;
+    lines.push(`<line x1="${x.toFixed(1)}" y1="0" x2="${x.toFixed(1)}" y2="${h}" stroke="#000" stroke-opacity="${isHour?.45:.2}" stroke-width="${isHour?2:1}"${isHour?'':' stroke-dasharray="5,5"'}/>`);
+    if(isHour) lines.push(`<text x="${x.toFixed(1)}" y="${h+22}" text-anchor="middle" font-size="15" fill="#8d8472">${Math.round(t/3600)}h</text>`);
+  }
+  return `<svg viewBox="0 0 ${w} ${h+30}" style="width:100%; height:${h+30}px; display:block;"><defs>${defs.join('')}</defs>${segRects}${lines.join('')}</svg>`;
+}
+function strategyLegendAndSummary(){
+  const { segments } = computeStrategy();
+  if(!segments.length) return '';
+  const perDriver={};
+  segments.forEach(s=>{ if(!perDriver[s.idx]) perDriver[s.idx]={ name:s.name, idx:s.idx, totalSec:0, relais:0 }; perDriver[s.idx].totalSec+=s.durSec; perDriver[s.idx].relais++; });
+  const rows=Object.values(perDriver).map(p=>`
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; padding:8px 0;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="width:20px;height:20px;border-radius:6px;background:${strategyColor(p.idx)};display:inline-block;"></span>
+        <span style="font-size:22px;">${esc(p.name)}</span></div>
+      <span class="mono muted" style="font-size:19px;">${p.relais} relais · ${fmtH(p.totalSec)} au total</span></div>`).join('');
+  return `<div style="display:flex; flex-direction:column; gap:2px;">${rows}</div>`;
+}
+
+// ── Paramètres course : contenu des 4 onglets ──
+function settingsGeneral(){
+  return `<div class="panel" style="padding:22px 28px; display:flex; gap:28px; align-items:center;">
+      ${state.sessionCode?qrSVG(state.sessionCode,160):''}
+      <div style="flex:1; min-width:0;">
+        <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Synchro appli bord-de-piste</div>
+        <div style="display:flex; align-items:baseline; gap:16px; margin:4px 0;">
+          <span class="mono" style="font-size:76px; font-weight:800; color:var(--accent); letter-spacing:8px;">${state.sessionCode?esc(state.sessionCode):'— — — —'}</span>
+          <span id="netstat" class="muted" style="font-size:22px;">…</span></div>
+        <div class="muted" style="font-size:18px;">Fais scanner le QR (ou saisir le code) sur le téléphone. Visible à tout moment ici via [P].</div>
+        <details style="margin-top:12px;"><summary style="cursor:pointer; font-size:20px; color:#cfc7b6;">Config Firebase (coller le snippet de la console)</summary>
+          <textarea id="fb-cfg" placeholder="const firebaseConfig = { apiKey:'…', databaseURL:'https://…', … }" style="width:100%; height:120px; margin-top:10px; background:#0f0d08; border:2px solid var(--line); border-radius:12px; color:var(--ink); font-family:var(--mono); font-size:18px; padding:12px;">${SYNC.cfg?esc(JSON.stringify(SYNC.cfg,null,1)):''}</textarea>
+          <div style="display:flex; gap:12px; margin-top:8px; align-items:center; flex-wrap:wrap;">
+            <button class="btn" id="fb-save" style="height:52px; padding:0 22px; font-size:20px;">Enregistrer la config</button>
+            <button class="btn" id="fb-regen" style="height:52px; padding:0 22px; font-size:20px;">Nouveau code</button>
+            <span class="muted" style="font-size:16px;">Best-effort : sans config/réseau, l'appli fonctionne normalement.</span></div>
+          <div style="display:flex; gap:12px; margin-top:10px; align-items:center; flex-wrap:wrap;">
+            <label style="font-size:18px; color:#cfc7b6;">SDK Firebase v <input id="fb-ver" value="${esc(FB_VER)}" style="width:120px; background:#0f0d08; border:1px solid var(--line); border-radius:8px; color:var(--ink); font-family:var(--mono); font-size:18px; padding:6px 8px;"></label>
+            <button class="btn" id="fb-reconnect" style="height:48px; padding:0 20px; font-size:18px;">Reconnecter / tester</button></div>
+          <div id="fb-err" class="muted" style="font-size:16px; margin-top:8px;"></div>
+        </details>
+      </div></div>`;
+}
+function settingsCourse(){
+  const ap=state.abandonPos;
+  const sd = state.race.startedAt? new Date(state.race.startedAt):null;
+  const startStr = sd? (pad(sd.getHours())+':'+pad(sd.getMinutes())+':'+pad(sd.getSeconds())) : '';
+  const remStr = state.race.startedAt? fmtH(Math.max(0,courseRem())) : '';
+  const started = state.race.startedAt!=null;
+  return `<button id="se-stop" style="${ap?('position:absolute; left:'+ap.left+'px; top:'+ap.top+'px; height:96px; padding:0 44px; font-size:36px; transition:left .15s, top .15s;'):'height:150px; font-size:58px;'} border:2px solid #7a1d1d; border-radius:20px; background:linear-gradient(180deg,#3a0d0d,#240707); color:#ff6b6b; font-family:var(--cond); font-weight:800; letter-spacing:2px; text-transform:uppercase; cursor:pointer;">⏹ Arrêter la course</button>
+    <button class="btn" id="se-reset" style="height:108px; border-radius:20px; font-size:40px; border:2px solid #463f2e;">↺ Reset complet</button>
+    ${started?`<div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:14px;">
+      <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Chrono général — corriger pendant la course</div>
+      <div style="display:flex; gap:30px; flex-wrap:wrap;">
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <span style="font-size:20px;">Heure réelle de départ</span>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <input class="field mono" id="se-starttime" value="${startStr}" placeholder="HH:MM:SS" style="width:230px; font-size:30px; padding:10px 14px;">
+            <button class="btn" id="se-starttime-go" style="height:58px; padding:0 20px; font-size:22px; border-radius:12px;">OK</button></div></div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <span style="font-size:20px;">…ou temps restant (h:mm:ss)</span>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <input class="field mono" id="se-remaining" value="${remStr}" placeholder="h:mm:ss" style="width:250px; font-size:30px; padding:10px 14px; color:var(--accent);">
+            <button class="btn" id="se-remaining-go" style="height:58px; padding:0 20px; font-size:22px; border-radius:12px;">OK</button></div></div>
+      </div></div>`:''}
+    <div class="panel" style="padding:22px 28px; display:flex; align-items:center; justify-content:space-between; gap:20px;">
+      <div><div style="font-size:26px; font-weight:600;">Délai d'auto-résolution du pit</div>
+        <div class="muted" style="font-size:20px;">Sans réponse à « est-ce correct ? », l'arrêt passe en « inconnu ».</div></div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <input class="field mono" id="se-autoresolve" value="${Math.round(state.cfg.autoResolveSec/60)}" style="width:120px; text-align:center; font-size:30px;">
+        <span class="muted" style="font-size:22px;">min</span></div></div>`;
+}
+function settingsAlertes(){
+  return `<div class="panel" style="padding:22px 28px; display:flex; align-items:center; justify-content:space-between; gap:20px;">
+      <div><div style="font-size:26px; font-weight:600;">Alerte « plein » (carburant)</div>
+        <div class="muted" style="font-size:20px;">Avertissement quand l'autonomie approche. Activable/désactivable à tout moment.</div></div>
+      <div style="display:flex; align-items:center; gap:14px;">
+        <input class="field mono" id="se-fuelmin" value="${Math.round(state.cfg.fuelSec/60)}" style="width:110px; text-align:center; font-size:30px;">
+        <span class="muted" style="font-size:20px;">min</span>
+        <label style="display:flex; align-items:center; gap:8px; font-size:24px; font-weight:700; color:${state.cfg.alerts.fuel?'var(--green)':'var(--muted)'};">
+          <input type="checkbox" id="se-fuel" ${state.cfg.alerts.fuel?'checked':''} style="width:26px;height:26px;accent-color:var(--green);"> ${state.cfg.alerts.fuel?'ON':'OFF'}</label></div></div>
+    <div class="panel" style="padding:22px 28px; display:flex; align-items:center; justify-content:space-between; gap:20px;">
+      <div><div style="font-size:26px; font-weight:600;">Alerte fin de relais</div>
+        <div class="muted" style="font-size:20px;">Déclenche « FAIRE RENTRER LE PILOTE » quand ce seuil est atteint. Modifiable à tout moment pendant la course.</div></div>
+      <div style="display:flex; align-items:center; gap:14px;">
+        <select class="field" id="se-relmode" style="font-size:26px; padding:8px 12px; width:auto;">
+          <option value="time" ${state.cfg.alerts.relaisMode==='time'?'selected':''}>Temps (min)</option>
+          <option value="laps" ${state.cfg.alerts.relaisMode==='laps'?'selected':''}>Nb de tours</option></select>
+        <input class="field mono" id="se-relval"
+          value="${state.cfg.alerts.relaisMode==='time'?Math.round(state.cfg.alerts.relaisTime/60):state.cfg.alerts.relaisLaps}"
+          style="width:110px; text-align:center; font-size:30px;"></div></div>
+    <div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:14px;">
+      <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Sons des alertes</div>
+      <div class="muted" style="font-size:16px; margin-top:-6px;">Un fichier audio perso (mp3…) remplace le preset intégré pour cette alerte.</div>
+      ${[['relais','Fin de relais (faire rentrer)'],['finish','Fin de course'],['fuel','Alerte plein'],['alarm','Appel du bord de piste']].map(([k,label])=>`
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;">
+        <div>
+          <div style="font-size:22px;">${label}</div>
+          ${customSounds[k]?'<div style="font-size:15px;color:var(--green);">🎵 fichier perso actif</div>':''}
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <select class="field" id="se-sound-${k}" data-sound-key="${k}" style="font-size:20px; padding:8px 12px; width:auto;">
+            ${soundOptionsHTML(state.cfg.sounds[k])}</select>
+          <button class="btn" data-sound-test="${k}" title="Écouter" style="height:48px; width:48px; padding:0; font-size:20px; border-radius:12px;">🔊</button>
+          <label class="btn" title="Choisir un fichier audio" style="height:48px; width:48px; padding:0; font-size:20px; border-radius:12px; display:flex; align-items:center; justify-content:center; cursor:pointer;">📁
+            <input type="file" accept="audio/*" data-sound-file="${k}" style="display:none;"></label>
+          ${customSounds[k]?`<button class="btn" data-sound-clear="${k}" title="Retirer le fichier perso" style="height:48px; width:48px; padding:0; font-size:20px; border-radius:12px;">✕</button>`:''}
+        </div></div>`).join('')}
+    </div>
+    ${customAlertsPanel()}`;
+}
+function settingsStrategie(){
+  return `<div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:18px;">
+      <div>
+        <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Projection de la rotation des relais</div>
+        <div class="muted" style="font-size:16px; margin-top:2px;">Calculée automatiquement à partir du nombre de pilotes, de leurs chronos, du temps de relais maximum et de la durée totale de la course — disponible dès la configuration, avant même le départ.</div>
+      </div>
+      ${strategyBarSVG()}
+      ${strategyLegendAndSummary()}
+    </div>
+    <div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:12px;">
+      <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Ordre &amp; pilotes actifs</div>
+      ${strategyRows()}
+      <div class="muted" style="font-size:18px;">Réordonne les relais à venir et désactive un pilote qui ne roulera plus (il sera sauté dans la rotation et dans la projection ci-dessus).</div></div>`;
+}
+
 // ── Alertes sur mesure : UI (Paramètres course) ──
 function customAlertSummary(a){
   const who = a.pilotName ? esc(a.pilotName) : 'Tous les pilotes';
@@ -889,8 +1072,17 @@ function customAlertsPanel(){
         <label style="font-size:16px; color:#cfc7b6; display:flex; flex-direction:column; gap:4px;">Heure
           <input class="field mono" id="ca-clocktime" type="time" value="${esc(d.clockTime||'12:00')}" style="font-size:18px; padding:8px 10px;"></label>
       </div>
-      <label style="font-size:16px; color:#cfc7b6; display:flex; flex-direction:column; gap:4px; width:fit-content;">Son
-        <select class="field" id="ca-sound" style="font-size:18px; padding:8px 10px;">${soundOptionsHTML(d.sound)}</select></label>
+      <div style="display:flex; flex-direction:column; gap:6px; width:fit-content;">
+        <span style="font-size:16px; color:#cfc7b6;">Son</span>
+        ${caCustomSound(d.id)?'<div style="font-size:14px;color:var(--green);">🎵 fichier perso actif</div>':''}
+        <div style="display:flex; align-items:center; gap:10px;">
+          <select class="field" id="ca-sound" style="font-size:18px; padding:8px 10px;">${soundOptionsHTML(d.sound)}</select>
+          <button type="button" id="ca-sound-test" title="Écouter" style="height:44px; width:44px; padding:0; font-size:18px; border-radius:10px; border:1px solid var(--border-4); background:var(--card-strong); color:var(--ink); cursor:pointer;">🔊</button>
+          <label title="Importer un fichier audio" style="height:44px; width:44px; padding:0; font-size:18px; border-radius:10px; border:1px solid var(--border-4); background:var(--card-strong); color:var(--ink); cursor:pointer; display:flex; align-items:center; justify-content:center;">📁
+            <input type="file" accept="audio/*" id="ca-sound-file" style="display:none;"></label>
+          ${caCustomSound(d.id)?`<button type="button" id="ca-sound-clear" title="Retirer le fichier perso" style="height:44px; width:44px; padding:0; font-size:18px; border-radius:10px; border:1px solid var(--border-4); background:var(--card-strong); color:var(--ink); cursor:pointer;">✕</button>`:''}
+        </div>
+      </div>
       <div style="display:flex; gap:10px; margin-top:4px;">
         <button id="ca-save" style="height:48px; padding:0 24px; border-radius:10px; border:1px solid #3a5a2a; background:#16240f; color:#9fd08a; font-weight:700; font-size:18px; cursor:pointer;">Enregistrer</button>
         <button id="ca-cancel" style="height:48px; padding:0 20px; border-radius:10px; border:1px solid #322d22; background:#1a1610; color:#8d8472; font-size:18px; cursor:pointer;">Annuler</button>
@@ -1453,99 +1645,18 @@ const SCREENS = {
           <button id="ab-yes" style="height:100px; padding:0 56px; border:2px solid #7a1d1d; border-radius:16px; background:#2a0d0d; color:#ff8a8a; font-weight:800; font-size:34px; cursor:pointer;">${t2?'Oui, arrêter':'Oui'}</button>
           <button class="btn-green" id="ab-no" style="height:100px; padding:0 56px; border-radius:16px; font-size:34px;">${t2?'Non, on continue !':'Non, annuler'}</button></div></div>`;
     }
-    const ap=state.abandonPos;
-    const sd = state.race.startedAt? new Date(state.race.startedAt):null;
-    const startStr = sd? (pad(sd.getHours())+':'+pad(sd.getMinutes())+':'+pad(sd.getSeconds())) : '';
-    const remStr = state.race.startedAt? fmtH(Math.max(0,courseRem())) : '';
-    const started = state.race.startedAt!=null;
+    const TABS=[['general','Général'],['course','Course'],['alertes','Alertes'],['strategie','Stratégie']];
+    const cur = TABS.some(t=>t[0]===state.settingsTab) ? state.settingsTab : 'general';
+    const tabsHTML = TABS.map(([k,label])=>`<button class="settings-tab" data-tab="${k}"
+      style="flex:1; padding:14px 10px; border-radius:12px; border:1px solid ${cur===k?'var(--accent)':'var(--line)'}; background:${cur===k?'#2a2110':'#1a1610'}; color:${cur===k?'var(--accent)':'var(--ink)'}; font-size:22px; font-weight:700; cursor:pointer;">${label}</button>`).join('');
+    const body = cur==='general'?settingsGeneral() : cur==='course'?settingsCourse() : cur==='alertes'?settingsAlertes() : settingsStrategie();
     return `<div class="screen" style="padding:48px 80px; display:flex; flex-direction:column; gap:24px; overflow-y:auto;">
       <div style="display:flex; align-items:flex-end; justify-content:space-between; border-bottom:2px solid var(--line); padding-bottom:18px;">
         <div class="h1" style="font-size:54px;">Paramètres course</div>
         <div class="muted mono" id="se-close" style="font-size:26px; cursor:pointer;">Fermer [Échap]</div></div>
+      <div style="display:flex; gap:10px; width:100%; max-width:1200px; margin:0 auto;">${tabsHTML}</div>
       <div style="display:flex; flex-direction:column; gap:22px; width:100%; max-width:1200px; margin:2px auto 40px;">
-        <div class="panel" style="padding:22px 28px; display:flex; gap:28px; align-items:center;">
-          ${state.sessionCode?qrSVG(state.sessionCode,160):''}
-          <div style="flex:1; min-width:0;">
-            <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Synchro appli bord-de-piste</div>
-            <div style="display:flex; align-items:baseline; gap:16px; margin:4px 0;">
-              <span class="mono" style="font-size:76px; font-weight:800; color:var(--accent); letter-spacing:8px;">${state.sessionCode?esc(state.sessionCode):'— — — —'}</span>
-              <span id="netstat" class="muted" style="font-size:22px;">…</span></div>
-            <div class="muted" style="font-size:18px;">Fais scanner le QR (ou saisir le code) sur le téléphone. Visible à tout moment ici via [P].</div>
-            <details style="margin-top:12px;"><summary style="cursor:pointer; font-size:20px; color:#cfc7b6;">Config Firebase (coller le snippet de la console)</summary>
-              <textarea id="fb-cfg" placeholder="const firebaseConfig = { apiKey:'…', databaseURL:'https://…', … }" style="width:100%; height:120px; margin-top:10px; background:#0f0d08; border:2px solid var(--line); border-radius:12px; color:var(--ink); font-family:var(--mono); font-size:18px; padding:12px;">${SYNC.cfg?esc(JSON.stringify(SYNC.cfg,null,1)):''}</textarea>
-              <div style="display:flex; gap:12px; margin-top:8px; align-items:center; flex-wrap:wrap;">
-                <button class="btn" id="fb-save" style="height:52px; padding:0 22px; font-size:20px;">Enregistrer la config</button>
-                <button class="btn" id="fb-regen" style="height:52px; padding:0 22px; font-size:20px;">Nouveau code</button>
-                <span class="muted" style="font-size:16px;">Best-effort : sans config/réseau, l'appli fonctionne normalement.</span></div>
-              <div style="display:flex; gap:12px; margin-top:10px; align-items:center; flex-wrap:wrap;">
-                <label style="font-size:18px; color:#cfc7b6;">SDK Firebase v <input id="fb-ver" value="${esc(FB_VER)}" style="width:120px; background:#0f0d08; border:1px solid var(--line); border-radius:8px; color:var(--ink); font-family:var(--mono); font-size:18px; padding:6px 8px;"></label>
-                <button class="btn" id="fb-reconnect" style="height:48px; padding:0 20px; font-size:18px;">Reconnecter / tester</button></div>
-              <div id="fb-err" class="muted" style="font-size:16px; margin-top:8px;"></div>
-            </details>
-          </div></div>
-        <button id="se-stop" style="${ap?('position:absolute; left:'+ap.left+'px; top:'+ap.top+'px; height:96px; padding:0 44px; font-size:36px; transition:left .15s, top .15s;'):'height:150px; font-size:58px;'} border:2px solid #7a1d1d; border-radius:20px; background:linear-gradient(180deg,#3a0d0d,#240707); color:#ff6b6b; font-family:var(--cond); font-weight:800; letter-spacing:2px; text-transform:uppercase; cursor:pointer;">⏹ Arrêter la course</button>
-        <button class="btn" id="se-reset" style="height:108px; border-radius:20px; font-size:40px; border:2px solid #463f2e;">↺ Reset complet</button>
-        ${started?`<div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:14px;">
-          <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Chrono général — corriger pendant la course</div>
-          <div style="display:flex; gap:30px; flex-wrap:wrap;">
-            <div style="display:flex; flex-direction:column; gap:8px;">
-              <span style="font-size:20px;">Heure réelle de départ</span>
-              <div style="display:flex; gap:10px; align-items:center;">
-                <input class="field mono" id="se-starttime" value="${startStr}" placeholder="HH:MM:SS" style="width:230px; font-size:30px; padding:10px 14px;">
-                <button class="btn" id="se-starttime-go" style="height:58px; padding:0 20px; font-size:22px; border-radius:12px;">OK</button></div></div>
-            <div style="display:flex; flex-direction:column; gap:8px;">
-              <span style="font-size:20px;">…ou temps restant (h:mm:ss)</span>
-              <div style="display:flex; gap:10px; align-items:center;">
-                <input class="field mono" id="se-remaining" value="${remStr}" placeholder="h:mm:ss" style="width:250px; font-size:30px; padding:10px 14px; color:var(--accent);">
-                <button class="btn" id="se-remaining-go" style="height:58px; padding:0 20px; font-size:22px; border-radius:12px;">OK</button></div></div>
-          </div></div>`:''}
-        <div class="panel" style="padding:22px 28px; display:flex; align-items:center; justify-content:space-between; gap:20px;">
-          <div><div style="font-size:26px; font-weight:600;">Délai d'auto-résolution du pit</div>
-            <div class="muted" style="font-size:20px;">Sans réponse à « est-ce correct ? », l'arrêt passe en « inconnu ».</div></div>
-          <div style="display:flex; align-items:center; gap:12px;">
-            <input class="field mono" id="se-autoresolve" value="${Math.round(state.cfg.autoResolveSec/60)}" style="width:120px; text-align:center; font-size:30px;">
-            <span class="muted" style="font-size:22px;">min</span></div></div>
-        <div class="panel" style="padding:22px 28px; display:flex; align-items:center; justify-content:space-between; gap:20px;">
-          <div><div style="font-size:26px; font-weight:600;">Alerte « plein » (carburant)</div>
-            <div class="muted" style="font-size:20px;">Avertissement quand l'autonomie approche. Activable/désactivable à tout moment.</div></div>
-          <div style="display:flex; align-items:center; gap:14px;">
-            <input class="field mono" id="se-fuelmin" value="${Math.round(state.cfg.fuelSec/60)}" style="width:110px; text-align:center; font-size:30px;">
-            <span class="muted" style="font-size:20px;">min</span>
-            <label style="display:flex; align-items:center; gap:8px; font-size:24px; font-weight:700; color:${state.cfg.alerts.fuel?'var(--green)':'var(--muted)'};">
-              <input type="checkbox" id="se-fuel" ${state.cfg.alerts.fuel?'checked':''} style="width:26px;height:26px;accent-color:var(--green);"> ${state.cfg.alerts.fuel?'ON':'OFF'}</label></div></div>
-        <div class="panel" style="padding:22px 28px; display:flex; align-items:center; justify-content:space-between; gap:20px;">
-          <div><div style="font-size:26px; font-weight:600;">Alerte fin de relais</div>
-            <div class="muted" style="font-size:20px;">Déclenche « FAIRE RENTRER LE PILOTE » quand ce seuil est atteint. Modifiable à tout moment pendant la course.</div></div>
-          <div style="display:flex; align-items:center; gap:14px;">
-            <select class="field" id="se-relmode" style="font-size:26px; padding:8px 12px; width:auto;">
-              <option value="time" ${state.cfg.alerts.relaisMode==='time'?'selected':''}>Temps (min)</option>
-              <option value="laps" ${state.cfg.alerts.relaisMode==='laps'?'selected':''}>Nb de tours</option></select>
-            <input class="field mono" id="se-relval"
-              value="${state.cfg.alerts.relaisMode==='time'?Math.round(state.cfg.alerts.relaisTime/60):state.cfg.alerts.relaisLaps}"
-              style="width:110px; text-align:center; font-size:30px;"></div></div>
-        <div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:14px;">
-          <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Sons des alertes</div>
-          <div class="muted" style="font-size:16px; margin-top:-6px;">Un fichier audio perso (mp3…) remplace le preset intégré pour cette alerte.</div>
-          ${[['relais','Fin de relais (faire rentrer)'],['finish','Fin de course'],['fuel','Alerte plein'],['alarm','Appel du bord de piste']].map(([k,label])=>`
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;">
-            <div>
-              <div style="font-size:22px;">${label}</div>
-              ${customSounds[k]?'<div style="font-size:15px;color:var(--green);">🎵 fichier perso actif</div>':''}
-            </div>
-            <div style="display:flex; align-items:center; gap:10px;">
-              <select class="field" id="se-sound-${k}" data-sound-key="${k}" style="font-size:20px; padding:8px 12px; width:auto;">
-                ${soundOptionsHTML(state.cfg.sounds[k])}</select>
-              <button class="btn" data-sound-test="${k}" title="Écouter" style="height:48px; width:48px; padding:0; font-size:20px; border-radius:12px;">🔊</button>
-              <label class="btn" title="Choisir un fichier audio" style="height:48px; width:48px; padding:0; font-size:20px; border-radius:12px; display:flex; align-items:center; justify-content:center; cursor:pointer;">📁
-                <input type="file" accept="audio/*" data-sound-file="${k}" style="display:none;"></label>
-              ${customSounds[k]?`<button class="btn" data-sound-clear="${k}" title="Retirer le fichier perso" style="height:48px; width:48px; padding:0; font-size:20px; border-radius:12px;">✕</button>`:''}
-            </div></div>`).join('')}
-        </div>
-        ${customAlertsPanel()}
-        <div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:12px;">
-          <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Stratégie de relais — ordre &amp; pilotes actifs</div>
-          ${strategyRows()}
-          <div class="muted" style="font-size:18px;">Réordonne les relais à venir et désactive un pilote qui ne roulera plus (il sera sauté dans la rotation).</div></div>
+        ${body}
         <div class="muted" style="font-size:22px;">Chaque action critique demande une confirmation.</div>
       </div>
     </div>`;
@@ -1660,6 +1771,7 @@ function wire(){
     document.querySelectorAll('.joke-dec').forEach(b=>b.addEventListener('click',()=>{ const k=b.dataset.k; state.jokeCounters[k]=Math.max(0,(state.jokeCounters[k]||0)-1); save(); render(); }));
   }
   if(ph==='settings'){
+    document.querySelectorAll('.settings-tab').forEach(b=>b.addEventListener('click',()=>{ state.settingsTab=b.dataset.tab; save(); render(); }));
     on('se-close','click',()=>go('live'));
     on('se-stop','click',abandonClick);                       // arrêter = abandonner (farceur)
     on('se-reset','click',()=>{ state.confirm='reset'; save(); render(); });
@@ -1687,13 +1799,24 @@ function wire(){
     }));
     document.querySelectorAll('[data-sound-clear]').forEach(btn=>btn.addEventListener('click',()=>{
       clearCustomSound(btn.dataset.soundClear); render(); toast('Fichier audio retiré, retour au son intégré'); }));
-    on('ca-add','click',()=>{ state.customAlertDraft={ id:null, text:'', pilotName:null, mode:'time', anchor:'start', value:5*60, clockTime:'12:00', scope:'relais', sound:'strident' }; render(); });
+    on('ca-add','click',()=>{ state.customAlertDraft={ id:'ca_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8), text:'', pilotName:null, mode:'time', anchor:'start', value:5*60, clockTime:'12:00', scope:'relais', sound:'strident' }; render(); });
     on('ca-cancel','click',()=>{ state.customAlertDraft=null; render(); });
     on('ca-save','click',saveCustomAlertDraft);
+    on('ca-sound-test','click',()=>{ playCaSound(state.customAlertDraft.id, $('#ca-sound').value); });
+    const casf=$('#ca-sound-file'); if(casf) casf.addEventListener('change',()=>{
+      const file=casf.files&&casf.files[0]; if(!file) return;
+      if(file.size>3*1024*1024) toast('⚠ Fichier volumineux : le navigateur pourrait refuser de le sauvegarder');
+      const reader=new FileReader();
+      reader.onload=()=>{ syncCustomAlertDraftFromForm(); setCaCustomSound(state.customAlertDraft.id,reader.result); render(); toast('🎵 Fichier audio associé'); };
+      reader.onerror=()=>toast('⚠ Lecture du fichier impossible');
+      reader.readAsDataURL(file);
+    });
+    on('ca-sound-clear','click',()=>{ syncCustomAlertDraftFromForm(); clearCaCustomSound(state.customAlertDraft.id); render(); toast('Fichier audio retiré, retour au son intégré'); });
     document.querySelectorAll('.ca-edit').forEach(btn=>btn.addEventListener('click',()=>{
       const a=state.cfg.customAlerts.find(x=>x.id===btn.dataset.id); if(a) state.customAlertDraft=Object.assign({},a); render(); }));
     document.querySelectorAll('.ca-del').forEach(btn=>btn.addEventListener('click',()=>{
       const id=btn.dataset.id; state.cfg.customAlerts=state.cfg.customAlerts.filter(x=>x.id!==id); delete state.customAlertFired[id];
+      clearCaCustomSound(id);
       if(state.customAlertDraft&&state.customAlertDraft.id===id) state.customAlertDraft=null;
       save(); render(); toast('Alerte supprimée'); }));
     const cam=$('#ca-mode'); if(cam) cam.addEventListener('change',()=>{

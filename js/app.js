@@ -134,6 +134,9 @@ const el = {
   pseudoForm: document.getElementById('pseudo-form'),
   pseudoInput: document.getElementById('pseudo-input'),
 
+  settingsPseudoInput: document.getElementById('settings-pseudo-input'),
+  settingsPseudoSaveBtn: document.getElementById('settings-pseudo-save-btn'),
+
   appFrame: document.getElementById('app-frame'),
   navPosLeftBtn: document.getElementById('nav-pos-left-btn'),
   navPosRightBtn: document.getElementById('nav-pos-right-btn'),
@@ -1498,7 +1501,16 @@ el.pseudoForm.addEventListener('submit', (e) => {
   if (!value) return;
   state.pseudo = value;
   persist();
+  el.settingsPseudoInput.value = value;
   render();
+});
+el.settingsPseudoSaveBtn.addEventListener('click', () => {
+  const value = el.settingsPseudoInput.value.trim();
+  if (!value) { showToast('Pseudo requis'); return; }
+  state.pseudo = value;
+  persist();
+  render();
+  showToast('Pseudo enregistré');
 });
 el.rentreBanner.addEventListener('click', () => el.rentreOverlay.classList.remove('hidden'));
 el.customAlertBanner.addEventListener('click', () => el.customAlertOverlay.classList.remove('hidden'));
@@ -1535,6 +1547,7 @@ el.pairingScanBtn.classList.toggle('hidden', !supportsQr());
 el.settingsConfigInput.value = transport.loadTransportConfig()
   ? JSON.stringify(transport.loadTransportConfig(), null, 2)
   : '';
+el.settingsPseudoInput.value = state.pseudo || '';
 // Try connecting as soon as a config is available (default or saved),
 // instead of waiting for the first pairing/push — so the status dot on
 // the Accueil page reflects real connectivity right away.
