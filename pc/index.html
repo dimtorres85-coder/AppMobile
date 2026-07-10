@@ -347,6 +347,11 @@ const DEFAULT = () => ({
     // [{id, text, pilotName:null|string ("tous" si null), mode:'time'|'laps'|'clock',
     //   anchor:'start'|'end', value:number (sec ou tours), clockTime:'HH:MM', scope:'relais'|'race', sound}]
     customAlerts: [],
+    // Plan de relais ajusté à la main (glisser une frontière entre deux
+    // segments sur la page Stratégie) : null tant qu'aucun ajustement n'a
+    // été fait, on utilise alors le calcul automatique équitable.
+    // [{idx, durSec}, ...] sinon — un idx par relais dans l'ordre.
+    strategyPlan: null,
   },
   variant: 'A',
   race: { startedAt:null, pausedMs:0 },
@@ -809,11 +814,16 @@ function swapDrivers(i,j){ const a=state.cfg.drivers; if(!a[i]||!a[j])return; [a
   state.pitHistory.forEach(p=>{ p.fromIdx=rm(p.fromIdx); p.toIdx=rm(p.toIdx); });
   if(state.pit && state.pit.fromIdx!=null) state.pit.fromIdx=rm(state.pit.fromIdx);
   if(state.incident && state.incident.crashedIdx!=null) state.incident.crashedIdx=rm(state.incident.crashedIdx); }
-function moveDriverUp(i){ if(i>0){ snapshot(); swapDrivers(i-1,i); save(); render(); } }
+// L'ordre/l'idx des pilotes conditionne le plan manuel de stratégie (chaque
+// relais y référence un idx) : un réordonnancement ou un changement d'actif
+// rendrait ces références fausses (mauvais pilote affiché au mauvais
+// relais), donc on l'efface plutôt que de risquer un plan incohérent — le
+// calcul automatique équitable reprend la main immédiatement.
+function moveDriverUp(i){ if(i>0){ snapshot(); swapDrivers(i-1,i); state.cfg.strategyPlan=null; save(); render(); } }
 function toggleDriverActive(i){ const d=drivers()[i]; if(!d)return;
   const turningOff = d.active!==false;
   if(turningOff){ const others=drivers().filter((x,j)=>j!==i && x.active!==false).length; if(others===0){ toast('Au moins un pilote actif requis'); return; } }
-  snapshot(); d.active = !turningOff; save(); render(); toast(turningOff?'Pilote désactivé':'Pilote réactivé'); }
+  snapshot(); d.active = !turningOff; state.cfg.strategyPlan=null; save(); render(); toast(turningOff?'Pilote désactivé':'Pilote réactivé'); }
 function strategyRows(){
   return drivers().map((dd,i)=>{ const off=dd.active===false;
     return `<div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-radius:10px; background:rgba(255,255,255,.04);${off?' opacity:.55;':''}">
@@ -828,26 +838,85 @@ function strategyRows(){
 // ── Stratégie automatique : projection de la rotation des relais ──
 const STRATEGY_COLORS=['#f5a623','#5fd06f','#4aa3e0','#e05c8a','#b98cf2','#e0c34a','#e0673f','#4ad0b0'];
 function strategyColor(i){ return STRATEGY_COLORS[i%STRATEGY_COLORS.length]; }
-// Simule la rotation (même règle que la vraie course : pilotes actifs dans
-// l'ordre de state.cfg.drivers, en boucle, chacun roulant jusqu'à son temps
-// de relais max) pour projeter qui roulera quand — utilisable dès la
-// configuration, avant même le départ de la course.
-function computeStrategy(){
-  const ds=drivers(); const totalSec=state.cfg.durationSec;
-  const activeCount=ds.filter(d=>d.active!==false).length;
-  if(!activeCount || !totalSec) return { segments:[], totalSec:totalSec||0 };
-  let idx=nextActiveDriver(-1); let elapsed=0; const segments=[]; let guard=0;
-  while(elapsed<totalSec && guard<1000){
+// Répartit équitablement un budget de temps entre pilotes, chacun plafonné
+// à son propre "relais max" : part égale pour tous, et le surplus des
+// pilotes qui buteraient sur leur plafond est redistribué aux autres
+// (plusieurs passes si besoin — répartition "water-filling" classique).
+// C'est ce qui permet, sur un dernier tour de rotation incomplet, de
+// diminuer les relais de tout le monde au lieu de vider le budget sur les
+// premiers pilotes de l'ordre et de laisser les suivants sans rien.
+function fairSplit(budgetSec,caps){
+  const n=caps.length; const alloc=new Array(n).fill(0);
+  let remaining=Math.min(budgetSec, caps.reduce((a,b)=>a+b,0));
+  let free=caps.map((_,i)=>i);
+  let guard=0;
+  while(remaining>0.5 && free.length && guard<n+2){
     guard++;
-    const d=ds[idx]; const maxSec=d.max||40*60; const dur=Math.min(maxSec, totalSec-elapsed);
-    const pace=driverPace(idx); const laps=pace? Math.round(dur/pace) : null;
-    segments.push({ idx, name:d.name, startSec:elapsed, durSec:dur, laps });
-    elapsed+=dur; idx=nextActiveDriver(idx);
+    const share=remaining/free.length;
+    let capped=false; const next=[];
+    for(const i of free){
+      const room=caps[i]-alloc[i];
+      if(share>=room-1e-6){ alloc[i]=caps[i]; remaining-=room; capped=true; }
+      else next.push(i);
+    }
+    if(!capped){ next.forEach(i=>{ alloc[i]+=remaining/next.length; }); remaining=0; free=[]; }
+    else free=next;
+  }
+  return alloc;
+}
+// Simule la rotation (même règle que la vraie course : pilotes actifs dans
+// l'ordre de state.cfg.drivers, en boucle) pour projeter qui roulera quand
+// — utilisable dès la configuration, avant même le départ. "Relais max"
+// est un plafond par relais, pas une valeur fixe : chaque tour complet de
+// la rotation utilise le plafond de chacun tant qu'il reste assez de temps
+// pour que tout le monde y passe ; le dernier tour, incomplet, répartit le
+// temps restant équitablement plutôt que de le donner en priorité aux
+// premiers pilotes de l'ordre.
+function computeStrategy(){
+  const active=drivers().map((d,i)=>({d,i})).filter(x=>x.d.active!==false);
+  const totalSec=state.cfg.durationSec;
+  if(!active.length || !totalSec) return { segments:[], totalSec:totalSec||0 };
+  const caps=active.map(x=>x.d.max||40*60);
+  const fullRoundSec=caps.reduce((a,b)=>a+b,0);
+  let elapsed=0; const segments=[]; let guard=0;
+  while(elapsed<totalSec-0.5 && guard<400){
+    guard++;
+    const remaining=totalSec-elapsed;
+    const roundAlloc = remaining>=fullRoundSec ? caps.slice() : fairSplit(remaining,caps);
+    for(let k=0;k<active.length;k++){
+      const durSec=roundAlloc[k]; if(durSec<1) continue;
+      const {d,i}=active[k]; const pace=driverPace(i); const laps=pace? Math.round(durSec/pace) : null;
+      segments.push({ idx:i, name:d.name, startSec:elapsed, durSec, laps });
+      elapsed+=durSec;
+    }
+    if(remaining<fullRoundSec) break;
   }
   return { segments, totalSec };
 }
+// Renvoie le plan à afficher : celui ajusté manuellement s'il existe et
+// correspond toujours à la durée de course actuelle, sinon le calcul
+// automatique équitable ci-dessus.
+function getStrategySegments(){
+  const totalSec=state.cfg.durationSec;
+  const plan=state.cfg.strategyPlan;
+  if(Array.isArray(plan) && plan.length){
+    const planTotal=plan.reduce((a,p)=>a+p.durSec,0);
+    if(Math.abs(planTotal-totalSec)<=5){
+      let elapsed=0; let valid=true;
+      const segments=plan.map(p=>{
+        const d=drivers()[p.idx];
+        if(!d || d.active===false){ valid=false; return null; }
+        const pace=driverPace(p.idx); const laps=pace? Math.round(p.durSec/pace) : null;
+        const seg={ idx:p.idx, name:d.name, startSec:elapsed, durSec:p.durSec, laps };
+        elapsed+=p.durSec; return seg;
+      });
+      if(valid) return { segments, totalSec };
+    }
+  }
+  return computeStrategy();
+}
 function strategyBarSVG(){
-  const { segments, totalSec } = computeStrategy();
+  const { segments, totalSec } = getStrategySegments();
   if(!segments.length) return `<div class="muted" style="padding:30px; text-align:center; font-size:20px;">Renseigne au moins un pilote actif, son temps de relais max et la durée de course.</div>`;
   const w=1400, h=120;
   const defs=[];
@@ -871,10 +940,18 @@ function strategyBarSVG(){
     lines.push(`<line x1="${x.toFixed(1)}" y1="0" x2="${x.toFixed(1)}" y2="${h}" stroke="#000" stroke-opacity="${isHour?.45:.2}" stroke-width="${isHour?2:1}"${isHour?'':' stroke-dasharray="5,5"'}/>`);
     if(isHour) lines.push(`<text x="${x.toFixed(1)}" y="${h+22}" text-anchor="middle" font-size="15" fill="#8d8472">${Math.round(t/3600)}h</text>`);
   }
-  return `<svg viewBox="0 0 ${w} ${h+30}" style="width:100%; height:${h+30}px; display:block;"><defs>${defs.join('')}</defs>${segRects}${lines.join('')}</svg>`;
+  // Poignées entre relais adjacents : glisser pour ajuster manuellement la
+  // frontière (comme un planning), en gardant la durée totale de course
+  // fixe (l'un grandit, son voisin rétrécit d'autant).
+  const handles = segments.length>1 ? segments.slice(0,-1).map((s,i)=>{
+    const x=((s.startSec+s.durSec)/totalSec)*w;
+    return `<rect class="strat-handle" data-boundary="${i}" x="${(x-8).toFixed(1)}" y="0" width="16" height="${h}" fill="transparent" style="cursor:ew-resize; touch-action:none;"/>
+      <rect x="${(x-1.5).toFixed(1)}" y="${(h/2-14).toFixed(1)}" width="3" height="28" rx="1.5" fill="rgba(255,255,255,.6)" pointer-events="none"/>`;
+  }).join('') : '';
+  return `<svg id="strat-svg" data-total-sec="${totalSec}" viewBox="0 0 ${w} ${h+30}" style="width:100%; height:${h+30}px; display:block; touch-action:none;"><defs>${defs.join('')}</defs>${segRects}${lines.join('')}${handles}</svg>`;
 }
 function strategyLegendAndSummary(){
-  const { segments } = computeStrategy();
+  const { segments } = getStrategySegments();
   const active=drivers().map((d,i)=>({d,i})).filter(x=>x.d.active!==false);
   if(!active.length) return '';
   // On part de TOUS les pilotes actifs (pas seulement ceux qui apparaissent
@@ -986,18 +1063,23 @@ function settingsAlertes(){
     ${customAlertsPanel()}`;
 }
 function settingsStrategie(){
+  const manual=Array.isArray(state.cfg.strategyPlan) && state.cfg.strategyPlan.length;
   return `<div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:18px;">
-      <div>
-        <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Projection de la rotation des relais</div>
-        <div class="muted" style="font-size:16px; margin-top:2px;">Calculée automatiquement à partir du nombre de pilotes, de leurs chronos, du temps de relais maximum et de la durée totale de la course (<b style="color:var(--ink);">${fmtH(state.cfg.durationSec)}</b>) — disponible dès la configuration, avant même le départ.</div>
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+        <div>
+          <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Projection de la rotation des relais</div>
+          <div class="muted" style="font-size:16px; margin-top:2px;">Calculée automatiquement pour être équitable, à partir du nombre de pilotes, de leurs chronos, du temps de relais maximum (un plafond, pas une valeur fixe) et de la durée totale de la course (<b style="color:var(--ink);">${fmtH(state.cfg.durationSec)}</b>) — disponible dès la configuration, avant même le départ.</div>
+        </div>
+        ${manual?`<button id="strat-reset" class="btn" style="flex:none; height:46px; padding:0 20px; font-size:16px; border-radius:10px;">🔄 Recalculer (équitable)</button>`:''}
       </div>
       ${strategyBarSVG()}
+      <div class="muted" style="font-size:15px; margin-top:-8px;">↔ Glisse la frontière entre deux relais pour ajuster leur durée à la main, comme un planning.${manual?' Répartition modifiée manuellement.':''}</div>
       ${strategyLegendAndSummary()}
     </div>
     <div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:12px;">
       <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Ordre &amp; pilotes actifs</div>
       ${strategyRows()}
-      <div class="muted" style="font-size:18px;">Réordonne les relais à venir et désactive un pilote qui ne roulera plus (il sera sauté dans la rotation et dans la projection ci-dessus).</div></div>`;
+      <div class="muted" style="font-size:18px;">Réordonne les relais à venir et désactive un pilote qui ne roulera plus (il sera sauté dans la rotation et dans la projection ci-dessus, qui repasse alors en calcul automatique).</div></div>`;
 }
 
 // ── Alertes sur mesure : UI (Paramètres course) ──
@@ -1139,6 +1221,56 @@ function openSettings(){ state.confirm=null; state.abandonStep=0; state.abandonP
 // readConfigInputs() est un no-op hors phase 'config', donc sûr à appeler
 // systématiquement pour prendre en compte une saisie pas encore validée.
 function openStrategyPage(){ readConfigInputs(); state.strategyReturn=state.phase; go('strategie'); }
+// Câblage du panneau Stratégie (bouton reset + glisser-déposer des
+// frontières entre relais) : partagé entre l'onglet Paramètres et la page
+// dédiée accessible depuis la config, toutes deux basées sur
+// settingsStrategie().
+function wireStrategyPanel(){
+  const rb=document.getElementById('strat-reset');
+  if(rb) rb.addEventListener('click',()=>{ state.cfg.strategyPlan=null; save(); render(); toast('Répartition recalculée automatiquement (équitable)'); });
+  const svg=document.getElementById('strat-svg'); if(!svg) return;
+  const totalSec=Number(svg.dataset.totalSec)||0; if(!totalSec) return;
+  document.querySelectorAll('.strat-handle').forEach(handle=>{
+    handle.addEventListener('pointerdown',(e)=>{
+      e.preventDefault();
+      const i=Number(handle.dataset.boundary);
+      const { segments } = getStrategySegments();
+      if(!segments[i] || !segments[i+1]) return;
+      // Premier ajustement : on fige la projection auto en plan modifiable
+      // (sinon on n'aurait rien de stable à faire glisser).
+      if(!Array.isArray(state.cfg.strategyPlan) || !state.cfg.strategyPlan.length){
+        state.cfg.strategyPlan=segments.map(s=>({ idx:s.idx, durSec:s.durSec }));
+      }
+      const plan=state.cfg.strategyPlan;
+      const startDurA=plan[i].durSec, startDurB=plan[i+1].durSec;
+      const rect=svg.getBoundingClientRect();
+      const pxToSec=totalSec/rect.width;
+      const startX=e.clientX;
+      const MIN=60; // plancher 1 min : évite qu'un relais disparaisse en glissant
+      let lastClientX=startX, rafPending=false;
+      const applyDrag=()=>{
+        rafPending=false;
+        const deltaSec=(lastClientX-startX)*pxToSec;
+        let newA=startDurA+deltaSec, newB=startDurB-deltaSec;
+        if(newA<MIN){ newB-=(MIN-newA); newA=MIN; }
+        if(newB<MIN){ newA-=(MIN-newB); newB=MIN; }
+        plan[i].durSec=Math.round(Math.max(MIN,newA));
+        plan[i+1].durSec=Math.round(Math.max(MIN,newB));
+        render(); // pas de save() par frame : trop fréquent, persisté au relâchement
+      };
+      const onMove=(ev)=>{ lastClientX=ev.clientX; if(!rafPending){ rafPending=true; requestAnimationFrame(applyDrag); } };
+      const onUp=()=>{
+        window.removeEventListener('pointermove',onMove);
+        window.removeEventListener('pointerup',onUp);
+        document.body.style.userSelect='';
+        save(); toast('Relais ajustés manuellement');
+      };
+      document.body.style.userSelect='none';
+      window.addEventListener('pointermove',onMove);
+      window.addEventListener('pointerup',onUp);
+    });
+  });
+}
 // modifier le chrono général pendant la course (heure de départ OU temps restant)
 function applyStartTime(str){ const p=String(str).trim().split(':').map(Number);
   if(p.length<2 || p.some(isNaN)){ toast('Format HH:MM(:SS)'); render(); return; }
@@ -1776,9 +1908,9 @@ function wire(){
   if(ph==='config'){
     on('c-start-btn','click',arm);
     on('c-strategy-btn','click',openStrategyPage);
-    on('c-adddriver','click',()=>{ readConfigInputs(); state.cfg.drivers.push({name:'Nouveau pilote',max:40*60,best:'',avg:''}); save(); render(); });
-    document.querySelectorAll('.up').forEach(b=>b.addEventListener('click',()=>{ readConfigInputs(); const i=+b.dataset.i; if(i>0){ const a=state.cfg.drivers;[a[i-1],a[i]]=[a[i],a[i-1]]; save(); render(); } }));
-    document.querySelectorAll('.del').forEach(b=>b.addEventListener('click',()=>{ readConfigInputs(); const i=+b.dataset.i; if(state.cfg.drivers.length>1){ state.cfg.drivers.splice(i,1); save(); render(); } }));
+    on('c-adddriver','click',()=>{ readConfigInputs(); state.cfg.drivers.push({name:'Nouveau pilote',max:40*60,best:'',avg:''}); state.cfg.strategyPlan=null; save(); render(); });
+    document.querySelectorAll('.up').forEach(b=>b.addEventListener('click',()=>{ readConfigInputs(); const i=+b.dataset.i; if(i>0){ const a=state.cfg.drivers;[a[i-1],a[i]]=[a[i],a[i-1]]; state.cfg.strategyPlan=null; save(); render(); } }));
+    document.querySelectorAll('.del').forEach(b=>b.addEventListener('click',()=>{ readConfigInputs(); const i=+b.dataset.i; if(state.cfg.drivers.length>1){ state.cfg.drivers.splice(i,1); state.cfg.strategyPlan=null; save(); render(); } }));
   }
   if(ph==='armed'){ on('a-launch','click',launch); on('a-back','click',()=>go('config')); }
   if(ph==='live'){
@@ -1803,6 +1935,7 @@ function wire(){
   }
   if(ph==='settings'){
     document.querySelectorAll('.settings-tab').forEach(b=>b.addEventListener('click',()=>{ state.settingsTab=b.dataset.tab; save(); render(); }));
+    if(state.settingsTab==='strategie') wireStrategyPanel();
     on('se-close','click',()=>go('live'));
     on('se-stop','click',abandonClick);                       // arrêter = abandonner (farceur)
     on('se-reset','click',()=>{ state.confirm='reset'; save(); render(); });
@@ -1863,7 +1996,7 @@ function wire(){
     on('fb-regen','click',()=>{ state.sessionCode=genCode(); SYNC.ready=false; SYNC.connected=false; save(); toast('Nouveau code : '+state.sessionCode); fbInit(true); render(); });
     on('fb-reconnect','click',()=>{ applyVer(); SYNC.ready=false; SYNC.connected=false; SYNC.err='reconnexion…'; toast('Reconnexion (SDK v'+FB_VER+')…'); updateNetDot(); fbInit(true); });
   }
-  if(ph==='strategie'){ on('strat-close','click',()=>go(state.strategyReturn||'config')); }
+  if(ph==='strategie'){ on('strat-close','click',()=>go(state.strategyReturn||'config')); wireStrategyPanel(); }
   if(ph==='pit'){ on('p-out','click',pitOut); on('p-cancel','click',cancelPit); }
   if(ph==='pitc'){
     on('pc-cancel','click',cancelPit);
