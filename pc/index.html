@@ -875,16 +875,23 @@ function strategyBarSVG(){
 }
 function strategyLegendAndSummary(){
   const { segments } = computeStrategy();
-  if(!segments.length) return '';
+  const active=drivers().map((d,i)=>({d,i})).filter(x=>x.d.active!==false);
+  if(!active.length) return '';
+  // On part de TOUS les pilotes actifs (pas seulement ceux qui apparaissent
+  // dans la simulation) : un pilote sans relais programmé doit rester
+  // visible avec "0 relais", sinon on dirait à tort qu'il a été ignoré.
   const perDriver={};
+  active.forEach(({d,i})=>{ perDriver[i]={ name:d.name, idx:i, totalSec:0, relais:0 }; });
   segments.forEach(s=>{ if(!perDriver[s.idx]) perDriver[s.idx]={ name:s.name, idx:s.idx, totalSec:0, relais:0 }; perDriver[s.idx].totalSec+=s.durSec; perDriver[s.idx].relais++; });
   const rows=Object.values(perDriver).map(p=>`
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; padding:8px 0;">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:14px; padding:8px 0;${p.relais?'':' opacity:.5;'}">
       <div style="display:flex; align-items:center; gap:10px;">
         <span style="width:20px;height:20px;border-radius:6px;background:${strategyColor(p.idx)};display:inline-block;"></span>
         <span style="font-size:22px;">${esc(p.name)}</span></div>
-      <span class="mono muted" style="font-size:19px;">${p.relais} relais · ${fmtH(p.totalSec)} au total</span></div>`).join('');
-  return `<div style="display:flex; flex-direction:column; gap:2px;">${rows}</div>`;
+      <span class="mono muted" style="font-size:19px;">${p.relais? (p.relais+' relais · '+fmtH(p.totalSec)+' au total') : 'aucun relais dans cette configuration'}</span></div>`).join('');
+  const missing = Object.values(perDriver).some(p=>!p.relais);
+  const warn = missing ? `<div class="muted" style="font-size:16px; color:#f5a623; margin-top:4px;">⚠ Avec la durée de course et les temps de relais max actuels, certains pilotes n'ont pas le temps de rouler — allonge la course, réduis les temps de relais max, ou retire les pilotes en trop.</div>` : '';
+  return `<div style="display:flex; flex-direction:column; gap:2px;">${rows}${warn}</div>`;
 }
 
 // ── Paramètres course : contenu des 4 onglets ──
@@ -982,7 +989,7 @@ function settingsStrategie(){
   return `<div class="panel" style="padding:22px 28px; display:flex; flex-direction:column; gap:18px;">
       <div>
         <div class="muted" style="font-size:22px; text-transform:uppercase; letter-spacing:2px;">Projection de la rotation des relais</div>
-        <div class="muted" style="font-size:16px; margin-top:2px;">Calculée automatiquement à partir du nombre de pilotes, de leurs chronos, du temps de relais maximum et de la durée totale de la course — disponible dès la configuration, avant même le départ.</div>
+        <div class="muted" style="font-size:16px; margin-top:2px;">Calculée automatiquement à partir du nombre de pilotes, de leurs chronos, du temps de relais maximum et de la durée totale de la course (<b style="color:var(--ink);">${fmtH(state.cfg.durationSec)}</b>) — disponible dès la configuration, avant même le départ.</div>
       </div>
       ${strategyBarSVG()}
       ${strategyLegendAndSummary()}
@@ -1128,6 +1135,10 @@ function crashPitMinutes(min){
 // stats / paramètres
 function openStats(){ state.statsReturn='live'; go('stats'); }
 function openSettings(){ state.confirm=null; state.abandonStep=0; state.abandonPos=null; go('settings'); }
+// Accessible dès la config (avant le départ) comme en cours de course —
+// readConfigInputs() est un no-op hors phase 'config', donc sûr à appeler
+// systématiquement pour prendre en compte une saisie pas encore validée.
+function openStrategyPage(){ readConfigInputs(); state.strategyReturn=state.phase; go('strategie'); }
 // modifier le chrono général pendant la course (heure de départ OU temps restant)
 function applyStartTime(str){ const p=String(str).trim().split(':').map(Number);
   if(p.length<2 || p.some(isNaN)){ toast('Format HH:MM(:SS)'); render(); return; }
@@ -1296,7 +1307,10 @@ const SCREENS = {
         <label class="panel" style="padding:18px 22px; display:flex; align-items:center; justify-content:space-between; font-size:22px; font-weight:600;">
           Alerte fin de course <input type="checkbox" id="c-finish" ${state.cfg.alerts.finish?'checked':''} style="width:24px;height:24px;accent-color:var(--green);"></label>
       </div>
-      <button class="btn-primary" id="c-start-btn" style="height:84px; border-radius:18px; font-size:38px; margin-top:2px;">Démarrer <span class="kbd">[Entrée]</span></button>
+      <div style="display:flex; gap:18px; margin-top:2px;">
+        <button class="btn" id="c-strategy-btn" style="flex:none; height:84px; padding:0 40px; border-radius:18px; font-size:26px;">📊 Stratégie</button>
+        <button class="btn-primary" id="c-start-btn" style="flex:1; height:84px; border-radius:18px; font-size:38px;">Démarrer <span class="kbd">[Entrée]</span></button>
+      </div>
     </div>`,
 
   armed: () => `
@@ -1665,6 +1679,18 @@ const SCREENS = {
       </div>
     </div>`;
   },
+
+  // Page dédiée, accessible dès la configuration (avant le départ) — même
+  // contenu que l'onglet Stratégie des Paramètres, pour préparer la course
+  // sans attendre d'être en piste.
+  strategie: () => `<div class="screen" style="padding:48px 80px; display:flex; flex-direction:column; gap:24px; overflow-y:auto;">
+      <div style="display:flex; align-items:flex-end; justify-content:space-between; border-bottom:2px solid var(--line); padding-bottom:18px;">
+        <div class="h1" style="font-size:54px;">Stratégie de course</div>
+        <div class="muted mono" id="strat-close" style="font-size:26px; cursor:pointer;">Fermer [Échap]</div></div>
+      <div style="display:flex; flex-direction:column; gap:22px; width:100%; max-width:1200px; margin:2px auto 40px;">
+        ${settingsStrategie()}
+      </div>
+    </div>`,
 };
 
 // icône highside stylisée (pilote éjecté par-dessus la moto)
@@ -1749,6 +1775,7 @@ function wire(){
   const ph=state.phase;
   if(ph==='config'){
     on('c-start-btn','click',arm);
+    on('c-strategy-btn','click',openStrategyPage);
     on('c-adddriver','click',()=>{ readConfigInputs(); state.cfg.drivers.push({name:'Nouveau pilote',max:40*60,best:'',avg:''}); save(); render(); });
     document.querySelectorAll('.up').forEach(b=>b.addEventListener('click',()=>{ readConfigInputs(); const i=+b.dataset.i; if(i>0){ const a=state.cfg.drivers;[a[i-1],a[i]]=[a[i],a[i-1]]; save(); render(); } }));
     document.querySelectorAll('.del').forEach(b=>b.addEventListener('click',()=>{ readConfigInputs(); const i=+b.dataset.i; if(state.cfg.drivers.length>1){ state.cfg.drivers.splice(i,1); save(); render(); } }));
@@ -1836,6 +1863,7 @@ function wire(){
     on('fb-regen','click',()=>{ state.sessionCode=genCode(); SYNC.ready=false; SYNC.connected=false; save(); toast('Nouveau code : '+state.sessionCode); fbInit(true); render(); });
     on('fb-reconnect','click',()=>{ applyVer(); SYNC.ready=false; SYNC.connected=false; SYNC.err='reconnexion…'; toast('Reconnexion (SDK v'+FB_VER+')…'); updateNetDot(); fbInit(true); });
   }
+  if(ph==='strategie'){ on('strat-close','click',()=>go(state.strategyReturn||'config')); }
   if(ph==='pit'){ on('p-out','click',pitOut); on('p-cancel','click',cancelPit); }
   if(ph==='pitc'){
     on('pc-cancel','click',cancelPit);
@@ -1901,6 +1929,7 @@ function onKey(e){
     if(ph==='stats'){ go(state.statsReturn||'live'); return; }
     if(ph==='finish'){ go('config'); return; }
     if(ph==='settings'){ if(state.confirm){ state.confirm=null; save(); render(); return; } if(state.abandonStep){ abandonCancel(); return; } go('live'); return; }
+    if(ph==='strategie'){ go(state.strategyReturn||'config'); return; }
     document.activeElement?.blur(); return;
   }
   // raccourcis Stats [S] / Paramètres [P] depuis toutes les pages sauf chute / pit / écrans transitoires
@@ -1951,6 +1980,11 @@ window.addEventListener('pointerdown',()=>audio(),{once:false});
 if(state.phase==='go'){ state.phase = state.race.startedAt ? 'live' : 'armed'; }
 else if(state.phase==='pit'){ state.phase='crashpit'; }              // §11 : on était en pit
 else if(['alertR','alertF','driver','crashmin','stats','settings','alarmTel'].includes(state.phase)){ state.phase='live'; state.confirm=null; state.abandonStep=0; state.abandonPos=null; state.alarmTel=null; }
+// 'strategie' est accessible dès la config (avant le départ), donc pas de
+// retour forcé vers 'live' comme les autres écrans transitoires ci-dessus
+// — un reload pendant la préparation ne doit pas faire croire qu'une
+// course est en cours.
+else if(state.phase==='strategie'){ state.phase=state.strategyReturn||'config'; }
 save();   // persiste l'état de reprise pour qu'un nouveau crash retombe au bon endroit
 
 fit();
