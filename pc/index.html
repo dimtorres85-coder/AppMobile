@@ -338,8 +338,8 @@ const DEFAULT = () => ({
     fuelSec: 18*60,
     autoResolveSec: 180,        // §10 auto-résolution pit "inconnu"
     drivers: [
-      { name:'', max:40*60, best:'', avg:'', active:true },
-      { name:'', max:40*60, best:'', avg:'', active:true },
+      { name:'', max:40*60, best:'', avg:'', active:true, color:'#f5a623' },
+      { name:'', max:40*60, best:'', avg:'', active:true, color:'#5fd06f' },
     ],
     alerts: { fuel:true, relaisMode:'time', relaisTime:5*60, relaisLaps:3, finish:true },
     sounds: { relais:'strident', finish:'doux', fuel:'feutre', alarm:'sirene' },
@@ -408,6 +408,11 @@ function migrate(s){ const d=DEFAULT(); // compléter les clés manquantes (anci
   if(s.statsTab===undefined) s.statsTab=null;
   if(!s.jokeCounters) s.jokeCounters={};
   if(!s.settingsTab) s.settingsTab='general';
+  // Couleur par pilote (stratégie) : rattrapage pour les sessions
+  // existantes qui n'en ont pas encore — une couleur de palette par
+  // défaut, ensuite personnalisable et qui suit le pilote s'il est
+  // réordonné (voir strategyColor()).
+  (s.cfg.drivers||[]).forEach((d,i)=>{ if(!d.color) d.color=STRATEGY_COLORS[i%STRATEGY_COLORS.length]; });
   (s.relais||[]).forEach(r=>{ if(r.pausedMs===undefined) r.pausedMs=0; }); return s;
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(state)); try{ fbPublish(); }catch(e){} }
@@ -825,9 +830,14 @@ function toggleDriverActive(i){ const d=drivers()[i]; if(!d)return;
   if(turningOff){ const others=drivers().filter((x,j)=>j!==i && x.active!==false).length; if(others===0){ toast('Au moins un pilote actif requis'); return; } }
   snapshot(); d.active = !turningOff; state.cfg.strategyPlan=null; save(); render(); toast(turningOff?'Pilote désactivé':'Pilote réactivé'); }
 function strategyRows(){
-  return drivers().map((dd,i)=>{ const off=dd.active===false;
+  return drivers().map((dd,i)=>{ const off=dd.active===false; const color=strategyColor(i);
     return `<div style="display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-radius:10px; background:rgba(255,255,255,.04);${off?' opacity:.55;':''}">
-      <span style="font-size:26px;"><b class="mono muted">${i+1}.</b> ${esc(dd.name)}${off?' <span style="color:#e0a0a0; font-size:18px;">· désactivé</span>':''}</span>
+      <span style="display:flex; align-items:center; gap:14px; font-size:26px;">
+        <b class="mono muted">${i+1}.</b>
+        <label title="Choisir la couleur de ${esc(dd.name)||'ce pilote'}" style="width:30px; height:30px; border-radius:9px; background:${color}; display:inline-block; cursor:pointer; border:2px solid rgba(255,255,255,.3); position:relative; flex:none;">
+          <input type="color" class="strat-color" data-i="${i}" value="${color}" style="position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; border:none; padding:0; margin:0;">
+        </label>
+        ${esc(dd.name)}${off?' <span style="color:#e0a0a0; font-size:18px;">· désactivé</span>':''}</span>
       <div style="display:flex; gap:8px;">
         <button class="mini strat-up" data-i="${i}" title="Monter">↑</button>
         <button class="strat-toggle" data-i="${i}" style="height:40px; padding:0 14px; border-radius:8px; border:1px solid ${off?'#3a5a2a':'#5a3a3a'}; background:#1a1610; color:${off?'#9fd08a':'#e0a0a0'}; font-weight:700; font-size:18px; cursor:pointer;">${off?'Activer':'Désactiver'}</button>
@@ -837,7 +847,12 @@ function strategyRows(){
 
 // ── Stratégie automatique : projection de la rotation des relais ──
 const STRATEGY_COLORS=['#f5a623','#5fd06f','#4aa3e0','#e05c8a','#b98cf2','#e0c34a','#e0673f','#4ad0b0'];
-function strategyColor(i){ return STRATEGY_COLORS[i%STRATEGY_COLORS.length]; }
+// Couleur d'un pilote : celle choisie à la main si elle existe, sinon la
+// palette par défaut selon sa position actuelle. Stockée SUR le pilote
+// (d.color), donc elle le suit quand on le réordonne — contrairement à un
+// simple calcul par index, qui resterait attaché à la position, pas au
+// pilote.
+function strategyColor(i){ const d=drivers()[i]; return (d&&d.color) || STRATEGY_COLORS[i%STRATEGY_COLORS.length]; }
 // Répartit équitablement un budget de temps entre pilotes, chacun plafonné
 // à son propre "relais max" : part égale pour tous, et le surplus des
 // pilotes qui buteraient sur leur plafond est redistribué aux autres
@@ -1908,7 +1923,9 @@ function wire(){
   if(ph==='config'){
     on('c-start-btn','click',arm);
     on('c-strategy-btn','click',openStrategyPage);
-    on('c-adddriver','click',()=>{ readConfigInputs(); state.cfg.drivers.push({name:'Nouveau pilote',max:40*60,best:'',avg:''}); state.cfg.strategyPlan=null; save(); render(); });
+    on('c-adddriver','click',()=>{ readConfigInputs();
+      const color=STRATEGY_COLORS[state.cfg.drivers.length%STRATEGY_COLORS.length];
+      state.cfg.drivers.push({name:'Nouveau pilote',max:40*60,best:'',avg:'',color}); state.cfg.strategyPlan=null; save(); render(); });
     document.querySelectorAll('.up').forEach(b=>b.addEventListener('click',()=>{ readConfigInputs(); const i=+b.dataset.i; if(i>0){ const a=state.cfg.drivers;[a[i-1],a[i]]=[a[i],a[i-1]]; state.cfg.strategyPlan=null; save(); render(); } }));
     document.querySelectorAll('.del').forEach(b=>b.addEventListener('click',()=>{ readConfigInputs(); const i=+b.dataset.i; if(state.cfg.drivers.length>1){ state.cfg.drivers.splice(i,1); state.cfg.strategyPlan=null; save(); render(); } }));
   }
@@ -1925,6 +1942,8 @@ function wire(){
   // stratégie partagée (incident + paramètres) : réordonner + activer/désactiver
   document.querySelectorAll('.strat-up').forEach(b=>b.addEventListener('click',()=>moveDriverUp(+b.dataset.i)));
   document.querySelectorAll('.strat-toggle').forEach(b=>b.addEventListener('click',()=>toggleDriverActive(+b.dataset.i)));
+  document.querySelectorAll('.strat-color').forEach(inp=>inp.addEventListener('change',()=>{
+    const d=drivers()[+inp.dataset.i]; if(!d) return; d.color=inp.value; save(); render(); }));
   if(ph==='stats'){ const back=()=>go(state.statsReturn||'live'); on('st-close','click',back); on('st-close-bg','click',back); on('st-csv','click',exportCSV);
     document.querySelectorAll('.pit-edit').forEach(inp=>inp.addEventListener('change',()=>editPit(+inp.dataset.k, inp.value)));
     on('st-view-table','click',()=>{ state.statsView='table'; save(); render(); });
